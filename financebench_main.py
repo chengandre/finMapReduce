@@ -21,10 +21,12 @@ def main():
                       help='Print detailed results for each QA pair')
     parser.add_argument('--max_tokens', type=int, default=8000,
                       help='Maximum number of tokens for the LLM')
+    parser.add_argument('--provider', type=str, default="openrouter",
+                      help='Provider of the LLM')
     args = parser.parse_args()
 
     print(f"Loading model: {args.model_name}")
-    llm = GPT(model_name=args.model_name, temperature=args.temperature, max_tokens=args.max_tokens)
+    llm = GPT(model_name=args.model_name, temperature=args.temperature, max_tokens=args.max_tokens, provider=args.provider)
 
     print(f"Processing {args.num_samples if args.num_samples else 'all'} samples from {args.jsonl_path}")
     results = process_financebench_qa(

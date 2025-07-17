@@ -1,11 +1,12 @@
-from langchain.chains import LLMChain
 from langchain.prompts import load_prompt
-import concurrent.futures
-import re
-import time
-from utils import load_pdf_chunk, num_tokens_from_string
+from utils import load_pdf_chunk
 from datetime import datetime
 from tqdm import tqdm
+
+import concurrent.futures
+import time
+import json
+import os
 
 
 def preprocess_results(results):
@@ -14,17 +15,9 @@ def preprocess_results(results):
     """
     modified_results = []
     for result in results:
-        try:
-            # modified_results.append(result)
-            score = 0
-            # print(result)
-            if "Score:" in result:
-                score = int(re.search(r'Score:\s(\d+)', result).group(1))
-                # print("Answer ========= > ", score, result.split("Score")[0])
-                if score > 50:
-                    modified_results.append(result)
-        except Exception as e:
-            print(e)
+        score = result.get("json", {}).get("relevance_score", 0)
+        if score > 7:
+            modified_results.append(result)
 
     return modified_results
 
@@ -133,40 +126,6 @@ def mapreduce_qa_documents(llm, chunked_docs, final_query, map_query):
     return result_final, results, total_docs, time_to_process, token_stats
 
 
-def evaluate_with_llm_judge(llm, qa_data, batch_size=5):
-    """
-    Evaluate model answers using an LLM judge with multithreading
-
-    Args:
-        llm: LLM to use for judging
-        qa_data (list): List of QA dictionaries containing question, golden answer and llm_answer
-        batch_size (int): Number of samples to judge in one batch
-
-    Returns:
-        dict: Evaluation results with scores and detailed judgments
-    """
-    # Load the judge prompt template
-    judge_prompt = load_prompt("judge_promtp.yml")
-
-    # Prepare batches for evaluation
-    total_samples = len(qa_data)
-    batches = []
-
-    for i in range(0, total_samples, batch_size):
-        batch = []
-        end_idx = min(i + batch_size, total_samples)
-
-        for j in range(i, end_idx):
-            sample = {
-                "llm_answer": qa_data[j]["llm_answer"],
-                "golden_answer": qa_data[j]["answer"],
-                "question": qa_data[j]["question"]
-            }
-            batch.append(sample)
-
-        batches.append((i // batch_size, batch))  # Include batch index for tracking
-
-
 def process_mapreduce_qa(files, selected_questions_dict, model_name, llm,
                          chunk_size, token_overlap, method="marker"):
     documents, token_count = [], 0
@@ -225,6 +184,164 @@ def load_financebench_data(jsonl_path, num_samples=None):
     return qa_data
 
 
+def evaluate_with_llm_judge(llm, qa_data, batch_size=5):
+    """
+    Evaluate model answers using an LLM judge with multithreading
+
+    Args:
+        llm: LLM to use for judging
+        qa_data (list): List of QA dictionaries containing question, golden answer and llm_answer
+        batch_size (int): Number of samples to judge in one batch
+
+    Returns:
+        dict: Evaluation results with scores and detailed judgments
+    """
+    # Load the judge prompt template
+    judge_prompt = load_prompt("prompts/judge_prompt.yml")
+
+    # Prepare batches for evaluation
+    total_samples = len(qa_data)
+    batches = []
+
+    for i in range(0, total_samples, batch_size):
+        batch = []
+        end_idx = min(i + batch_size, total_samples)
+
+        for j in range(i, end_idx):
+            sample = {
+                "llm_answer": qa_data[j]["llm_answer"],
+                "golden_answer": qa_data[j]["answer"],
+                "question": qa_data[j]["question"]
+            }
+            batch.append(sample)
+
+        batches.append((i // batch_size, batch))  # Include batch index for tracking
+
+    def _process_batch(batch_data):
+        """Process a single batch of evaluations"""
+        batch_idx, batch = batch_data
+
+        # Format the context for the judge prompt
+        context_parts = []
+        for i, sample in enumerate(batch, 1):
+
+            item_block = (
+                f"  <item>\n"
+                f"    <item_number>{i}</item_number>\n"
+                f"    <query>\n"
+                f"      {sample['question']}\n"
+                f"    </query>\n"
+                f"    <answers_to_compare>\n"
+                f"      <llm_answer>\n"
+                f"        {sample['llm_answer']}\n"
+                f"      </llm_answer>\n"
+                f"      <golden_answer>\n"
+                f"        {sample['golden_answer']}\n"
+                f"      </golden_answer>\n"
+                f"    </answers_to_compare>\n"
+                f"  </item>"
+            )
+            context_parts.append(item_block)
+
+        # Wrap all items in a single root tag
+        context = "<evaluation_items>\n" + "\n".join(context_parts) + "\n</evaluation_items>"
+
+        try:
+            # Get the judge's response
+            judge_response = llm(judge_prompt, context=context)
+
+            # Parse JSON response from the wrapper
+            evaluation_data = judge_response.get('json', {})
+
+            return {
+                "batch_idx": batch_idx,
+                "success": True,
+                "evaluation_data": evaluation_data,
+                "batch": batch
+            }
+        except Exception as e:
+            print(f"Error processing batch {batch_idx + 1}: {str(e)}")
+            fallback = {"evaluation_results": [
+                {"evaluation_number": i+1,
+                 "reasoning": f"Processing error: {str(e)}",
+                 "judgement": "Error"}
+                for i in range(len(batch))
+            ]}
+
+            return {
+                "batch_idx": batch_idx,
+                "success": False,
+                "evaluation_data": fallback,
+                "batch": batch,
+                "error": str(e)
+            }
+
+    print(f"Judge evaluation: Processing {len(batches)} batches with multithreading...")
+
+    # Process batches in parallel
+    all_judgments = []
+    batch_results = []
+
+    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+        # Submit all batch processing tasks
+        future_to_batch = {executor.submit(_process_batch, batch_data): batch_data for batch_data in batches}
+
+        # Collect results as they complete
+        for future in concurrent.futures.as_completed(future_to_batch):
+            try:
+                result = future.result()
+                batch_results.append(result)
+                print(f"Completed judge batch {result['batch_idx'] + 1}/{len(batches)}")
+            except Exception as e:
+                batch_data = future_to_batch[future]
+                batch_idx = batch_data[0]
+                print(f"Error in judge batch {batch_idx + 1}: {e}")
+
+    # Sort results by batch index to maintain order
+    batch_results.sort(key=lambda x: x['batch_idx'])
+
+    # Apply results back to qa_data
+    for result in batch_results:
+        batch_idx = result['batch_idx']
+        evaluation_data = result['evaluation_data']
+        all_judgments.append(evaluation_data)
+
+        # Add judgment results back to qa_data
+        for i, eval_result in enumerate(evaluation_data.get("evaluation_results", [])):
+            qa_idx = batch_idx * batch_size + i
+            if qa_idx < len(qa_data):
+                qa_data[qa_idx]["judgment"] = eval_result.get("judgement", "Error")
+                qa_data[qa_idx]["reasoning"] = eval_result.get("reasoning", "No reasoning provided")
+
+    # Calculate overall statistics
+    total_correct = 0
+    total_incorrect = 0
+    total_no_answer = 0
+    total_samples = 0
+
+    for qa_item in qa_data:
+        judgment = qa_item.get("judgment", "Error")
+        if judgment == "Correct":
+            total_correct += 1
+        elif judgment == "Incorrect":
+            total_incorrect += 1
+        elif judgment == "No answer":
+            total_no_answer += 1
+        total_samples += 1
+
+    # Prepare overall results
+    results = {
+        "correct": total_correct,
+        "incorrect": total_incorrect,
+        "no_answer": total_no_answer,
+        "total": total_samples,
+        "accuracy": total_correct / total_samples if total_samples > 0 else 0,
+        "detailed_judgments": all_judgments
+    }
+
+    return results
+
+
 def process_financebench_qa(jsonl_path, model_name, llm, num_samples=None, chunk_size=36000, chunk_overlap=1000):
     """
     Process QA from financebench.
@@ -255,7 +372,7 @@ def process_financebench_qa(jsonl_path, model_name, llm, num_samples=None, chunk
         docs, token_count = load_pdf_chunk(doc_name, chunk_size, chunk_overlap, method="marker")
 
         # Load prompts from YAML
-        map_prompt = load_prompt("map_prompt.yml")
+        map_prompt = load_prompt("prompts/map_prompt.yml")
 
         # Track map phase token usage
         map_input_tokens = 0
@@ -264,7 +381,7 @@ def process_financebench_qa(jsonl_path, model_name, llm, num_samples=None, chunk
         def process_chunk(chunk):
             return llm(map_prompt, context=chunk.page_content, final_query=question)
 
-        # print("Map phase started, calling LLMs")
+        print("Map phase started, calling LLMs")
         with concurrent.futures.ThreadPoolExecutor(10) as executor:
             results = list(executor.map(process_chunk, docs))
         # print("Map phase completed")
@@ -279,7 +396,7 @@ def process_financebench_qa(jsonl_path, model_name, llm, num_samples=None, chunk
                 map_output_tokens += raw_response.usage_metadata["output_tokens"]
 
         # Load reduce prompt
-        reduce_prompt = load_prompt("reduce_prompt.yml")
+        reduce_prompt = load_prompt("prompts/reduce_prompt.yml")
 
         # Process map results for reduce phase - handle JSON format
         processed_results = []
