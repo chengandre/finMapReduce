@@ -9,18 +9,17 @@ template: |
   </mode>
 
   <template>
-    <summary>
-    *Your summary of the chunk*
-    </summary>
-    <terms>
-    *List of all financial terms, concepts, and numbers present in the chunk*
-    </terms>
-    <answer>
-    *Your attempt to answer the final query based on the chunk*
-    </answer>
-    <relevance_score>
-    *Your relevance score of the chunk to the final query*
-    </relevance_score>
+  {{
+  "summary": "string with the summary of the chunk",
+  "terms": [
+    "array of strings with all financial terms, concepts, and numbers present in the chunk"
+  ],
+  "evidence": [
+    "array of strings with the literal copied evidence of the chunk"
+  ]
+  "answer": "string with your attempt to answer the final query based solely on the given context",
+  "relevance_score": "integer with the relevance score of the chunk to the final query",
+  }}
   </template>
 
   <context>
@@ -36,7 +35,17 @@ template: |
     - An attempt to answer the final query based on the chunk (in <answer>);
     - A relevance score of the chunk to the final query (in <relevance_score>);
 
-  Your output has to be in the format specified below in <template>.
+  Output Format:
+  You MUST provide your response as a single, valid JSON object. Do not write any text or explanations outside of the JSON object itself.
+
+  The JSON object must contain five keys:
+    - "summary": A string summarising the chunk.
+    - "terms": An array of strings, each string being a financial term, concept, or number present in the chunk.
+    - "evidence": An array of strings, each string being a literal copy of the evidence in the chunk.
+    - "answer": A string attempting to answer the final query based solely on the given context.
+    - "relevance_score": An integer representing the relevance score of the chunk to the final query. This should be ranked from 0 to 10, with 10 being the most relevant.
+
+  Example in <template> tag.
   </task>
 
   <final_query>

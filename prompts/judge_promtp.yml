@@ -1,5 +1,5 @@
 _type: prompt
-input_variables: [context] 
+input_variables: [context]
 template: |
   <mode>
   Absolute Mode. Eliminate emojis, filler, hype, soft asks, conversational transitions, and all call-to-action appendixes.
@@ -9,50 +9,57 @@ template: |
   </mode>
 
   <template>
-    <reasoning_1>
-    *Your reasoning for the first answer*
-    </reasoning_1>
-    <answer_1>
-    *Your first answer*
-    </answer_1>
-    <reasoning_2>
-    *Your reasoning for the second answer*
-    </reasoning_2>
-    <answer_2>
-    *Your second answer*
-    </answer_2>
-    <reasoning_3>
-    *Your reasoning for the third answer*
-    </reasoning_3>
-    <answer_3>
-    *Your third answer*
-    </answer_3>
-    <reasoning_4>
-    *Your reasoning for the fourth answer*
-    </reasoning_4>
-    <answer_4>
-    *Your fourth answer*
-    </answer_4>
-    <reasoning_5>
-    *Your reasoning for the fifth answer*
-    </reasoning_5>
-    <answer_5>
-    *Your fifth answer*
-    </answer_5>
+    {{
+      "evaluation_results": [
+        {{
+          "evaluation_number": 1,
+          "reasoning": "string with reasoning for the answer",
+          "judgement": "string with the answer"
+        }},
+        {{
+          "evaluation_number": 2,
+          "reasoning": "...",
+          "judgement": "..."
+        }},
+        {{
+          "evaluation_number": 3,
+          "reasoning": "...",
+          "judgement": "..."
+        }},
+        {{
+          "evaluation_number": 4,
+          "reasoning": "...",
+          "judgement": "..."
+        }},
+        {{
+          "evaluation_number": 5,
+          "reasoning": "...",
+          "judgement": "..."
+        }}
+      ]
+    }}
   </template>
 
   <task>
   You are an expert financial analyst. Your next task is to judge if the LLM answer matches the given golden answer.
 
-  You are given 5 triples of (LLM answer, golden answer, query) in <context>. Based solely on the provided context, your final output has to include the following in their respective tags:
-    - A reasoning for the each answer (in <reasoning_1>, <reasoning_2>, <reasoning_3>, <reasoning_4>, <reasoning_5>);
-    - A judgement for the each answer (in <answer_1>, <answer_2>, <answer_3>, <answer_4>, <answer_5>);
-  The judgement should be one of the following:
-    - "Correct" if the LLM answer matches the golden answer, note that small rounding errors are allowed;
-    - "Incorrect" if the LLM answer attempts to answer the query but the answer does not match the golden answer;
-    - "No answer" if the LLM did not provide an attempt to answer the query or it said there is not enough information to answer the query;
+  You are given 5 triples of (LLM answer, golden answer, query) in <context>. Based solely on the provided context, you must evaluate each of the 5 triples.
 
-  Your output has to be in the format specified below in <template>.
+  Evaluation Criteria:
+  For each triple, your judgement must be one of the following three strings:
+    - "Correct": If the LLM answer matches the golden answer or is partially correct. Small rounding errors are allowed. If the LLM answer is a subset of the golden answer, it is still considered correct.
+    - "Incorrect": If the LLM answer attempts to answer the query but does not match the golden answer.
+    - "No answer": If the LLM refused to answer the query or stated there was not enough information.
+
+  Output Format:
+  You MUST provide your response as a single, valid JSON object. Do not write any text or explanations outside of the JSON object itself.
+
+  The JSON object must contain one key, "evaluation_results", which holds an array of 5 objects. Each object in the array represents the evaluation for one of the triples and must contain exactly these three keys:
+    - evaluation_number: The integer number of the triple being evaluated (from 1 to 5).
+    - reasoning: A string explaining your reasoning for the judgement.
+    - judgement: Your evaluation, which must be one of the three strings defined in the criteria above.
+
+  Example in <template> tag.
   </task>
 
   <context>

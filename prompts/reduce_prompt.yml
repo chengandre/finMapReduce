@@ -9,12 +9,13 @@ template: |
   </mode>
 
   <template>
-    <reasoning>
-    *Your reasoning process and all possible explanations and clarifications*
-    </reasoning>
-    <answer>
-    *Your final concise and direct answer to the user query*
-    </answer>
+  {{
+  "reasoning": "string with your reasoning process and all possible explanations and clarifications",
+  "evidence": [
+    "array of strings with the literal copied evidence from the context"
+  ],
+  "answer": "string with your final concise and direct answer to the user query based solely on the given map results"
+  }}
   </template>
 
   <map_results>
@@ -22,12 +23,24 @@ template: |
   </map_results>
 
   <task>
-  You are an expert financial analyst. Your next task is to provide a final answer to the query of the Map Reduce architecture designed for financial QA. The system receives a final query and a list of chunks of a financial document, it will summarise and extract relevant information from the chunks in the Map phase and then reduce the information to answer the final query in the Reduce phase.
+  You are an expert financial analyst. Your next task is to provide a final answer to the query of the MapReduce architecture designed for financial QA, i.e. your output is the final answer of the Reduce phase. The system receives a final query and a list of chunks of a financial document, it will summarise and extract relevant information from the chunks in the Map phase and then reduce the information to answer the final query in the Reduce phase.
 
-  You are given the user query in <final_query> and all the map results from the Map phase in <map_results>. 
-  Based solely on the intermediate context given to you, you will need to provide a final answer to the user query along with the reasoning process. Note that the final answer should be a direct answer to the user query, not a summary or a paraphrase, refrain from adding any explanations and clarifications, all these should be included in the reasoning process.
+  You are given the user query in <final_query> and all the map results from the Map phase in <map_results>. In <map_results> you will find the outputs from the Map phase, each of which contain:
+    - a summary of a chunk of the financial document
+    - a list of all financial terms, concepts, and numbers present in that chunk
+    - the evidence to backup the attempt answer. These will be needed to back up your final answer.
+    - an attempt to answer the final query
+    - the relevance score of the chunk to the final query.
 
-  Your output has to be in the format specified below in <template>.
+  Output Format:
+  You MUST provide your response as a single, valid JSON object. Do not write any text or explanations outside of the JSON object itself.
+
+  The JSON object must contain 3 keys:
+    - "reasoning": A string summarising the reasoning process and all possible explanations and clarifications.
+    - "evidence": An array of strings containing the literal copied evidence from the context.
+    - "answer": A string containing your final concise and direct answer to the user query based solely on the given map results. This should not be a summary of a paraphrase, refrain from adding any explanations and clarifications, all these should be included in the reasoning process.
+
+  Example in <template> tag.
   </task>
 
   <final_query>
