@@ -2,7 +2,7 @@ import os
 import re
 import time
 import json
-import requests
+import json5
 import tiktoken
 import subprocess
 from pathlib import Path
@@ -29,7 +29,7 @@ class GPT:
         self.model_name = model_name
         self.temperature = temperature
         self.max_tokens = max_tokens
-        self.provider = provider
+        self.provider = provider.lower()
 
         # Configure based on provider
         if provider == "openrouter":
@@ -81,13 +81,15 @@ class GPT:
                 ]
 
                 is_retryable = any(error_type.lower() in error_str.lower() for error_type in retryable_errors)
+                is_retryable = True
 
                 if not is_retryable or attempt == max_retries - 1:
                     raise e
 
                 delay = min(base_delay * (2 ** attempt), 60)
                 print(f"Error (attempt {attempt + 1}/{max_retries}): {error_str}")
-                print(f"Retrying in {delay} seconds...")
+                # print(f"Error (attempt {attempt + 1}/{max_retries})")
+                # print(f"Retrying in {delay} seconds...")
                 time.sleep(delay)
 
     def _parse_json(self, response):
@@ -100,7 +102,10 @@ class GPT:
             # Try to parse the entire content as JSON first
             return json.loads(content)
         except json.JSONDecodeError:
-            pass
+            try:
+                return json5.loads(content)
+            except json.JSONDecodeError:
+                pass
 
         # Try to extract JSON from code blocks (```json ... ``` or ``` ... ```)
         code_block_patterns = [
@@ -113,7 +118,7 @@ class GPT:
             matches = re.findall(pattern, content, re.DOTALL)
             for match in matches:
                 try:
-                    return json.loads(match.strip())
+                    return json5.loads(match.strip())
                 except json.JSONDecodeError:
                     continue
 
@@ -128,7 +133,7 @@ class GPT:
                 matches.sort(key=len, reverse=True)
                 for match in matches:
                     try:
-                        return json.loads(match)
+                        return json5.loads(match)
                     except json.JSONDecodeError:
                         continue
 
@@ -136,7 +141,7 @@ class GPT:
             pass
 
         # If we get here, JSON parsing failed completely
-        raise ValueError(f"Invalid JSON response. Content: {content[:300]}...")
+        raise ValueError(f"Invalid JSON response. Content:\n{content}")
 
 
 def num_tokens_from_string(string: str, encoding_name: str) -> int:
@@ -177,6 +182,7 @@ def _marker_parser(pdf_file, force_reparse=False):
 
     # Run marker CLI command
     try:
+        output_dir = Path("marker")
         print(f"Parsing {pdf_file} with marker...")
         cmd = ["marker_single", pdf_file, "--output_dir", str(output_dir), "--output_format", "markdown", "--format_lines"]
         subprocess.run(cmd, check=True)
@@ -198,7 +204,6 @@ def _process_documents(documents, chunk_size, chunk_overlap, use_tiktoken=False)
     # Calculate token count from document content
     content = str(documents) if len(documents) > 1 else documents[0].page_content
     token_count = num_tokens_from_string(content, "cl100k_base")
-    print(f'PDF Token Count: {token_count}')
 
     # Choose appropriate text splitter
     if use_tiktoken:
@@ -214,6 +219,7 @@ def _process_documents(documents, chunk_size, chunk_overlap, use_tiktoken=False)
         )
 
     split_documents = text_splitter.split_documents(documents)
+    print(f'PDF Token Count: {token_count}, Document Count: {len(split_documents)}')
     return split_documents, token_count
 
 
