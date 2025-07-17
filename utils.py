@@ -1,28 +1,139 @@
-from langchain_openai import ChatOpenAI
-from langchain.document_loaders import PyPDFLoader, PDFMinerLoader
-from langchain.text_splitter import CharacterTextSplitter
-import tiktoken
 import os
+import re
+import time
+import json
+import requests
+import tiktoken
+import subprocess
+from pathlib import Path
+from pydantic import SecretStr
+from dotenv import load_dotenv
+from langchain.schema import Document
+from langchain_openai import ChatOpenAI
+from langchain.text_splitter import CharacterTextSplitter
+from langchain_community.document_loaders import PyPDFLoader, PDFMinerLoader, PyMuPDFLoader, UnstructuredPDFLoader
 
+load_dotenv()
 
-os.environ["OPENAI_API_KEY"] = ''
+class GPT:
+    def __init__(self, model_name, temperature, max_tokens, provider="openrouter"):
+        """
+        Initialize an LLM wrapper for either OpenAI or OpenRouter
 
-def load_openai_model(model_name, temperature, max_tokens):
-    """
-    load openai models
+        Args:
+            model_name (str): The model to use
+            temperature (float): Temperature setting for generation
+            max_tokens (int): Maximum tokens for completion
+            provider (str): Either "openai" or "openrouter"
+        """
+        self.model_name = model_name
+        self.temperature = temperature
+        self.max_tokens = max_tokens
+        self.provider = provider
 
-    Args:
-        model_name (str): the model to be used from openai
-    Returns:
-        llm: the langauge model on which queries/summarsation would be done on
-    """
-    llm = ChatOpenAI(
-        model_name=model_name,
-        openai_api_key=os.environ["OPENAI_API_KEY"],
-        temperature=temperature,
-        max_tokens=max_tokens
-    )
-    return llm
+        # Configure based on provider
+        if provider == "openrouter":
+            api_key = SecretStr(os.getenv("OPENROUTER_API_KEY", ""))
+            base_url = "https://openrouter.ai/api/v1"
+        else:  # default to openai
+            api_key = SecretStr(os.getenv("OPENAI_API_KEY", ""))
+            base_url = None
+
+        self.llm = ChatOpenAI(
+            model=model_name,
+            api_key=api_key,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            base_url=base_url,
+            max_retries=50
+        )
+
+    def __call__(self, prompt, **kwargs):
+        max_retries = 50
+        base_delay = 2
+
+        for attempt in range(max_retries):
+            try:
+                chain = prompt | self.llm
+                response = chain.invoke(kwargs)
+
+                self._parse_json(response)
+                return response
+
+            except Exception as e:
+                error_str = str(e)
+
+                retryable_errors = [
+                    "Internal Server Error",
+                    "500",
+                    "502",
+                    "503",
+                    "504",
+                    "timeout",
+                    "connection",
+                    "rate limit",
+                    "too many requests",
+                    "json",
+                    "invalid json"
+                ]
+
+                is_retryable = any(error_type.lower() in error_str.lower() for error_type in retryable_errors)
+
+                if not is_retryable or attempt == max_retries - 1:
+                    raise e
+
+                delay = min(base_delay * (2 ** attempt), 60)
+                print(f"Error (attempt {attempt + 1}/{max_retries}): {error_str}")
+                print(f"Retrying in {delay} seconds...")
+                time.sleep(delay)
+
+    def _parse_json(self, response):
+        """
+        Parse JSON from the response, handling various formats including code blocks
+        """
+        content = response.content if hasattr(response, 'content') else str(response)
+
+        try:
+            # Try to parse the entire content as JSON first
+            return json.loads(content)
+        except json.JSONDecodeError:
+            pass
+
+        # Try to extract JSON from code blocks (```json ... ``` or ``` ... ```)
+        code_block_patterns = [
+            r'```json\s*\n(.*?)\n```',  # ```json ... ```
+            r'```\s*\n(.*?)\n```',      # ``` ... ```
+            r'`(.*?)`'                   # `...` (single backticks)
+        ]
+
+        for pattern in code_block_patterns:
+            matches = re.findall(pattern, content, re.DOTALL)
+            for match in matches:
+                try:
+                    return json.loads(match.strip())
+                except json.JSONDecodeError:
+                    continue
+
+        # Try to find JSON object patterns in the response
+        try:
+            # Look for JSON object patterns (handles nested objects better)
+            json_pattern = r'\{(?:[^{}]|{[^{}]*})*\}'
+            matches = re.findall(json_pattern, content, re.DOTALL)
+
+            if matches:
+                # Try to parse each match, starting with the largest
+                matches.sort(key=len, reverse=True)
+                for match in matches:
+                    try:
+                        return json.loads(match)
+                    except json.JSONDecodeError:
+                        continue
+
+        except (json.JSONDecodeError, ValueError):
+            pass
+
+        # If we get here, JSON parsing failed completely
+        raise ValueError(f"Invalid JSON response. Content: {content[:300]}...")
 
 
 def num_tokens_from_string(string: str, encoding_name: str) -> int:
