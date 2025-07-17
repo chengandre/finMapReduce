@@ -368,10 +368,13 @@ def main():
     # Create timestamp for filenames
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
 
-    # Create error directories
-    error_dir = "map_reduce/llm_judge_errors"
+    # Create directories
+    results_dir = "llm_judge_results"
+    error_dir = os.path.join(results_dir, "errors")
     incorrect_judgments_dir = os.path.join(error_dir, "incorrect_judgments")
     validation_errors_dir = os.path.join(error_dir, "validation_errors")
+
+    os.makedirs(results_dir, exist_ok=True)
     os.makedirs(incorrect_judgments_dir, exist_ok=True)
     os.makedirs(validation_errors_dir, exist_ok=True)
 
@@ -427,6 +430,38 @@ def main():
             json.dump(incorrect_judgments_data, f, indent=2, ensure_ascii=False)
 
         print(f"Incorrect judgments saved to {incorrect_judgments_file}")
+
+    # Save overall results summary
+    results_summary_file = os.path.join(results_dir, f"llm_judge_results_{timestamp}.json")
+
+    results_summary = {
+        "timestamp": timestamp,
+        "test_mode": test_mode,
+        "samples_processed": total_samples,
+        "total_expected_samples": total_expected_samples,
+        "processing_success_rate": processing_success_rate,
+        "overall_accuracy": accuracy,
+        "errors": {
+            "validation_errors": validation_errors,
+            "api_errors": api_errors
+        },
+        "accuracy_by_label": {}
+    }
+
+    # Add accuracy by label to summary
+    for label, data in label_results_aggregate.items():
+        if data["total"] > 0:
+            label_accuracy = data["correct"] / data["total"]
+            results_summary["accuracy_by_label"][label] = {
+                "accuracy": label_accuracy,
+                "correct": data["correct"],
+                "total": data["total"]
+            }
+
+    with open(results_summary_file, 'w', encoding='utf-8') as f:
+        json.dump(results_summary, f, indent=2, ensure_ascii=False)
+
+    print(f"Results summary saved to {results_summary_file}")
 
 if __name__ == "__main__":
     main()
