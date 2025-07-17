@@ -133,6 +133,40 @@ def mapreduce_qa_documents(llm, chunked_docs, final_query, map_query):
     return result_final, results, total_docs, time_to_process, token_stats
 
 
+def evaluate_with_llm_judge(llm, qa_data, batch_size=5):
+    """
+    Evaluate model answers using an LLM judge with multithreading
+
+    Args:
+        llm: LLM to use for judging
+        qa_data (list): List of QA dictionaries containing question, golden answer and llm_answer
+        batch_size (int): Number of samples to judge in one batch
+
+    Returns:
+        dict: Evaluation results with scores and detailed judgments
+    """
+    # Load the judge prompt template
+    judge_prompt = load_prompt("judge_promtp.yml")
+
+    # Prepare batches for evaluation
+    total_samples = len(qa_data)
+    batches = []
+
+    for i in range(0, total_samples, batch_size):
+        batch = []
+        end_idx = min(i + batch_size, total_samples)
+
+        for j in range(i, end_idx):
+            sample = {
+                "llm_answer": qa_data[j]["llm_answer"],
+                "golden_answer": qa_data[j]["answer"],
+                "question": qa_data[j]["question"]
+            }
+            batch.append(sample)
+
+        batches.append((i // batch_size, batch))  # Include batch index for tracking
+
+
 def process_mapreduce_qa(files, selected_questions_dict, model_name, llm,
                          chunk_size, token_overlap, method="marker"):
     documents, token_count = [], 0
@@ -314,6 +348,10 @@ def process_financebench_qa(jsonl_path, model_name, llm, num_samples=None, chunk
             }
         }
 
+    # Evaluate using LLM judge
+    print("Evaluating answers using LLM judge...")
+    evaluation_results = evaluate_with_llm_judge(llm, qa_data)
+
     # Save results to file
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     results_dir = "financebench_results"
@@ -327,11 +365,13 @@ def process_financebench_qa(jsonl_path, model_name, llm, num_samples=None, chunk
         "num_samples": len(qa_data),
         "qa_data": qa_data,
         "chunk_size": chunk_size,
-        "chunk_overlap": chunk_overlap
+        "chunk_overlap": chunk_overlap,
+        "evaluation_summary": evaluation_results
     }
 
     with open(results_file, 'w', encoding='utf-8') as f:
         json.dump(results, f, indent=2)
     print(f"Results saved to {results_file}")
+    print(f"Accuracy: {evaluation_results['accuracy']:.2f}")
 
     return results
