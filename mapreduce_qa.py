@@ -52,20 +52,13 @@ def mapreduce_qa_documents(llm, chunked_docs, final_query, map_query):
     # Load prompts from YAML
     map_prompt = load_prompt("prompts/map_prompt.yml")
     total_docs = len(chunked_docs)
-    # Create the LLMChain
-    llm_chain_map = LLMChain(prompt=map_prompt, llm=llm, memory=None)
 
     # Track map phase token usage
     map_input_tokens = 0
     map_output_tokens = 0
 
     def process_chunk(chunk):
-        nonlocal map_input_tokens
-        input_data = {"context": chunk, "final_query": final_query}
-        # Count input tokens for this chunk
-        chunk_input_tokens = num_tokens_from_string(f"{chunk} {final_query}", "cl100k_base")
-        map_input_tokens += chunk_input_tokens
-        return llm_chain_map.run(input_data)
+        return llm(map_prompt, context=chunk, final_query=final_query)
 
     print("Map phase started, calling LLMs")
     with concurrent.futures.ThreadPoolExecutor() as executor:
@@ -74,25 +67,48 @@ def mapreduce_qa_documents(llm, chunked_docs, final_query, map_query):
     print("Results:")
     print(results)
 
-    # Count output tokens from map phase
+    # Count tokens from map phase using usage_metadata from raw_response
     for result in results:
-        map_output_tokens += num_tokens_from_string(result, "cl100k_base")
+        raw_response = result.get('raw_response')
+        if raw_response and hasattr(raw_response, 'usage_metadata') and raw_response.usage_metadata:
+            map_input_tokens += raw_response.usage_metadata.get("input_tokens", 0)
+            map_output_tokens += raw_response.usage_metadata.get("output_tokens", 0)
 
     # modified_results = preprocess_results(results=results)
 
     # Load reduce prompt
     reduce_prompt = load_prompt("prompts/reduce_prompt.yml")
 
-    # Track reduce phase token usage
-    results_text = "\n".join(results)
-    reduce_input_tokens = num_tokens_from_string(f"{results_text} {final_query}", "cl100k_base")
+    # Extract content from results for reduce phase - handle JSON format
+    processed_results = []
+    for result in results:
+        # Get JSON data from the wrapper result
+        result_json = result.get('json', {})
+        if result_json:
+            # Format the JSON data for the reduce phase
+            formatted_result = f"Summary: {result_json.get('summary', '')}\n"
+            formatted_result += f"Terms: {', '.join(result_json.get('terms', []))}\n"
+            formatted_result += f"Evidence: {'; '.join(result_json.get('evidence', []))}\n"
+            formatted_result += f"Answer: {result_json.get('answer', '')}\n"
+            formatted_result += f"Relevance Score: {result_json.get('relevance_score', 0)}\n"
+            processed_results.append(formatted_result)
+        else:
+            # Fallback to raw response content
+            raw_response = result.get('raw_response')
+            if raw_response:
+                content = raw_response.content if hasattr(raw_response, 'content') else str(raw_response)
+                processed_results.append(content)
 
-    input_data_reduce = {"map_results": results, "final_query": final_query}
-    llm_chain_reduce = LLMChain(prompt=reduce_prompt, llm=llm, memory=None)
-    result_final = llm_chain_reduce.run(input_data_reduce)
+    results_text = "\n---\n".join(processed_results)
+    result_final = llm(reduce_prompt, map_results=results_text, final_query=final_query)
 
-    # Count output tokens from reduce phase
-    reduce_output_tokens = num_tokens_from_string(result_final, "cl100k_base")
+    # Count tokens from reduce phase using usage_metadata from raw_response
+    reduce_input_tokens = 0
+    reduce_output_tokens = 0
+    final_raw_response = result_final.get('raw_response')
+    if final_raw_response and hasattr(final_raw_response, 'usage_metadata') and final_raw_response.usage_metadata:
+        reduce_input_tokens = final_raw_response.usage_metadata.get("input_tokens", 0)
+        reduce_output_tokens = final_raw_response.usage_metadata.get("output_tokens", 0)
 
     time_to_process = time.time() - t1
 
@@ -117,7 +133,7 @@ def mapreduce_qa_documents(llm, chunked_docs, final_query, map_query):
 
 
 def process_mapreduce_qa(files, selected_questions_dict, model_name, llm,
-                         chunk_size, token_overlap, method):
+                         chunk_size, token_overlap, method="marker"):
     documents, token_count = [], 0
     for i in range(len(files)):
         temp_documents, temp_token_count = load_pdf_chunk(files[i], chunk_size, token_overlap, method=method)
