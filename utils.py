@@ -57,8 +57,11 @@ class GPT:
                 chain = prompt | self.llm
                 response = chain.invoke(kwargs)
 
-                self._parse_json(response)
-                return response
+                parsed_json = self._parse_json(response)
+                return {
+                    'json': parsed_json,
+                    'raw_response': response
+                }
 
             except Exception as e:
                 error_str = str(e)
