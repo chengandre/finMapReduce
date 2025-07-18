@@ -4,7 +4,9 @@ import time
 import json
 import json5
 import tiktoken
+import threading
 import subprocess
+
 from pathlib import Path
 from pydantic import SecretStr
 from dotenv import load_dotenv
@@ -144,6 +146,60 @@ class GPT:
         raise ValueError(f"Invalid JSON response. Content:\n{content}")
 
 
+class TokenBucketRateLimiter:
+    """Rate limiter using token bucket algorithm"""
+    
+    def __init__(self, calls_per_minute=20, burst_size=8):
+        """
+        Args:
+            calls_per_minute: Sustained rate limit (20 calls/minute)
+            burst_size: Maximum burst capacity (8 calls instantly)
+        """
+        self.rate = calls_per_minute / 60.0  # Convert to tokens per second
+        self.burst_size = burst_size         # Maximum tokens in bucket
+        self.tokens = float(burst_size)      # Start with full bucket
+        self.last_update = time.time()       # Last time we added tokens
+        self.lock = threading.Lock()         # Thread safety
+    
+    def acquire_token(self):
+        """Wait if necessary to respect rate limit (iterative approach)"""
+        while True:
+            with self.lock:
+                now = time.time()
+                elapsed = now - self.last_update
+                tokens_to_add = elapsed * self.rate
+                self.tokens = min(self.burst_size, self.tokens + tokens_to_add)
+                self.last_update = now
+
+                if self.tokens >= 1.0:
+                    self.tokens -= 1.0
+                    return  # We have a token, proceed
+
+                # Calculate wait time if no token is available
+                tokens_needed = 1.0 - self.tokens
+                wait_time = tokens_needed / self.rate
+            
+            if wait_time > 0:
+                time.sleep(wait_time)
+
+
+class RateLimitedGPT(GPT):
+    """GPT wrapper with shared token bucket rate limiting"""
+    
+    # Class-level rate limiter shared across all instances
+    _rate_limiter = TokenBucketRateLimiter(
+        calls_per_minute=500,    # Conservative API limit
+        burst_size=100           # Allow bursts for chunk processing
+    )
+    
+    def __call__(self, prompt, **kwargs):
+        # Wait for token before making API call
+        self._rate_limiter.acquire_token()
+        
+        # Make the actual API call (with existing retry logic)
+        return super().__call__(prompt, **kwargs)
+
+
 def num_tokens_from_string(string: str, encoding_name: str) -> int:
     """Returns the number of tokens in a text string."""
     encoding = tiktoken.get_encoding(encoding_name)
@@ -170,7 +226,7 @@ def _marker_parser(pdf_file, force_reparse=False):
     # Check if pdf is already parsed from financeBench
     markdown_path = ".." / Path("marker_financebench") / pdf_name / f"{pdf_name}.md"
     if not force_reparse and markdown_path.exists():
-        print(f"Found existing financeBench markdown for {pdf_name}: {markdown_path}")
+        # print(f"Found existing financeBench markdown for {pdf_name}: {markdown_path}")
         return str(markdown_path)
 
     # Create output directory if it doesn't exist
@@ -219,7 +275,7 @@ def _process_documents(documents, chunk_size, chunk_overlap, use_tiktoken=False)
         )
 
     split_documents = text_splitter.split_documents(documents)
-    print(f'PDF Token Count: {token_count}, Document Count: {len(split_documents)}')
+    # print(f'PDF Token Count: {token_count}, Document Count: {len(split_documents)}')
     return split_documents, token_count
 
 
