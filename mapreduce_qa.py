@@ -282,7 +282,7 @@ def evaluate_with_llm_judge(llm, qa_data, batch_size=5):
     all_judgments = []
     batch_results = []
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=10) as executor:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=20) as executor:
         # Submit all batch processing tasks
         future_to_batch = {executor.submit(_process_batch, batch_data): batch_data for batch_data in batches}
 
@@ -342,9 +342,123 @@ def evaluate_with_llm_judge(llm, qa_data, batch_size=5):
     return results
 
 
-def process_financebench_qa(jsonl_path, model_name, llm, num_samples=None, chunk_size=36000, chunk_overlap=1000):
+def process_single_qa(qa_pair, llm, chunk_size=36000, chunk_overlap=1000):
     """
-    Process QA from financebench.
+    Process a single QA pair from financebench.
+
+    Args:
+        qa_pair (dict): QA pair dictionary containing question and doc_name
+        llm: LLM instance to use
+        chunk_size (int): Size of each document chunk
+        chunk_overlap (int): Overlap between document chunks
+
+    Returns:
+        dict: Updated QA pair with LLM answer and token stats
+    """
+    # Get document name and question from the qa_pair
+    doc_name = qa_pair["doc_name"]
+    question = qa_pair["question"]
+
+    # Load document chunks
+    docs, token_count = load_pdf_chunk(doc_name, chunk_size, chunk_overlap, method="marker")
+
+    # Load prompts from YAML
+    map_prompt = load_prompt("prompts/map_prompt.yml")
+
+    # Track map phase token usage
+    map_input_tokens = 0
+    map_output_tokens = 0
+
+    def process_chunk(chunk):
+        return llm(map_prompt, context=chunk.page_content, final_query=question)
+
+    # print(f"Map phase started for {doc_name}")
+    with concurrent.futures.ThreadPoolExecutor(len(docs)) as executor:
+        results = list(executor.map(process_chunk, docs))
+    # print(f"Map phase completed for {doc_name}")
+
+    # Count output tokens from map phase
+    for result in results:
+        raw_response = result.get('raw_response')
+        if raw_response and hasattr(raw_response, 'usage_metadata') and raw_response.usage_metadata:
+            map_input_tokens += raw_response.usage_metadata["input_tokens"]
+            map_output_tokens += raw_response.usage_metadata["output_tokens"]
+
+    # Load reduce prompt
+    reduce_prompt = load_prompt("prompts/reduce_prompt.yml")
+
+    # Process map results for reduce phase - handle JSON format
+    processed_results = []
+    for result in results:
+        # Get JSON data from the wrapper result
+        result_json = result.get('json', {})
+        if result_json:
+            # Format the JSON data for the reduce phase
+            formatted_result = f"Summary: {result_json.get('summary', '')}\n"
+            formatted_result += f"Terms: {', '.join(result_json.get('terms', []))}\n"
+            formatted_result += f"Evidence: {'; '.join(result_json.get('evidence', []))}\n"
+            formatted_result += f"Answer: {result_json.get('answer', '')}\n"
+            formatted_result += f"Relevance Score: {result_json.get('relevance_score', 0)}\n"
+            processed_results.append(formatted_result)
+        else:
+            # Fallback to raw response content
+            raw_response = result.get('raw_response')
+            if raw_response:
+                content = raw_response.content if hasattr(raw_response, 'content') else str(raw_response)
+                processed_results.append(content)
+
+    results_text = "\n---\n".join(processed_results)
+    result_final = llm(reduce_prompt, map_results=results_text, final_query=question)
+
+    # Get token usage from raw response
+    final_raw_response = result_final.get('raw_response')
+    reduce_input_tokens = 0
+    reduce_output_tokens = 0
+    if final_raw_response and hasattr(final_raw_response, 'usage_metadata') and final_raw_response.usage_metadata:
+        reduce_input_tokens = final_raw_response.usage_metadata["input_tokens"]
+        reduce_output_tokens = final_raw_response.usage_metadata["output_tokens"]
+
+    # Parse JSON response from reduce phase
+    reduce_json = result_final.get('json', {})
+    if reduce_json:
+        clean_answer = reduce_json.get("answer", "")
+        clean_reasoning = reduce_json.get("reasoning", "No reasoning provided")
+        clean_evidence = reduce_json.get("evidence", [])
+    else:
+        # Fallback to raw response content
+        if final_raw_response:
+            clean_answer = final_raw_response.content if hasattr(final_raw_response, 'content') else str(final_raw_response)
+        else:
+            clean_answer = str(result_final)
+        clean_reasoning = "No reasoning provided"
+        clean_evidence = []
+
+    # Store the LLM answer and reasoning directly in the qa_pair dictionary
+    qa_pair["llm_answer"] = clean_answer
+    qa_pair["llm_reasoning"] = clean_reasoning
+    qa_pair["llm_evidence"] = clean_evidence
+
+    # Store token usage statistics
+    qa_pair["token_stats"] = {
+        "map_phase": {
+            "input_tokens": map_input_tokens,
+            "output_tokens": map_output_tokens
+        },
+        "reduce_phase": {
+            "input_tokens": reduce_input_tokens,
+            "output_tokens": reduce_output_tokens
+        },
+        "total": {
+            "input_tokens": map_input_tokens + reduce_input_tokens,
+            "output_tokens": map_output_tokens + reduce_output_tokens
+        }
+    }
+
+    return qa_pair
+
+def process_financebench_qa(jsonl_path, model_name, llm, num_samples=None, chunk_size=36000, chunk_overlap=1000, max_concurrent_qa=3):
+    """
+    Process QA from financebench with parallel processing of QA pairs.
 
     Args:
         jsonl_path (str): Path to financebench jsonl file
@@ -353,6 +467,7 @@ def process_financebench_qa(jsonl_path, model_name, llm, num_samples=None, chunk
         num_samples (int): Number of samples to process
         chunk_size (int): Size of each document chunk
         chunk_overlap (int): Overlap between document chunks
+        max_concurrent_qa (int): Maximum number of QA pairs to process concurrently
 
     Returns:
         dict: Results containing model answers, golden answers, and evaluation results
@@ -361,109 +476,29 @@ def process_financebench_qa(jsonl_path, model_name, llm, num_samples=None, chunk
     qa_data = load_financebench_data(jsonl_path, num_samples)
 
     t1 = time.time()
-    print("Processing QA pairs with MapReduce...")
-    for i, qa_pair in enumerate(tqdm(qa_data, desc="Processing QA pairs")):
-        # print(f"Processing QA pair {i+1}/{len(qa_data)}: {qa_pair['doc_name']}")
-
-        # Get document name from the qa_pair
-        doc_name = qa_pair["doc_name"]
-        question = qa_pair["question"]
-
-        docs, token_count = load_pdf_chunk(doc_name, chunk_size, chunk_overlap, method="marker")
-
-        # Load prompts from YAML
-        map_prompt = load_prompt("prompts/map_prompt.yml")
-
-        # Track map phase token usage
-        map_input_tokens = 0
-        map_output_tokens = 0
-
-        def process_chunk(chunk):
-            return llm(map_prompt, context=chunk.page_content, final_query=question)
-
-        print("Map phase started, calling LLMs")
-        with concurrent.futures.ThreadPoolExecutor(10) as executor:
-            results = list(executor.map(process_chunk, docs))
-        # print("Map phase completed")
-        # print("Results:")
-        # print(results)
-
-        # Count output tokens from map phase
-        for result in results:
-            raw_response = result.get('raw_response')
-            if raw_response and hasattr(raw_response, 'usage_metadata') and raw_response.usage_metadata:
-                map_input_tokens += raw_response.usage_metadata["input_tokens"]
-                map_output_tokens += raw_response.usage_metadata["output_tokens"]
-
-        # Load reduce prompt
-        reduce_prompt = load_prompt("prompts/reduce_prompt.yml")
-
-        # Process map results for reduce phase - handle JSON format
-        processed_results = []
-        for result in results:
-            # Get JSON data from the wrapper result
-            result_json = result.get('json', {})
-            if result_json:
-                # Format the JSON data for the reduce phase
-                formatted_result = f"Summary: {result_json.get('summary', '')}\n"
-                formatted_result += f"Terms: {', '.join(result_json.get('terms', []))}\n"
-                formatted_result += f"Evidence: {'; '.join(result_json.get('evidence', []))}\n"
-                formatted_result += f"Answer: {result_json.get('answer', '')}\n"
-                formatted_result += f"Relevance Score: {result_json.get('relevance_score', 0)}\n"
-                processed_results.append(formatted_result)
-            else:
-                # Fallback to raw response content
-                raw_response = result.get('raw_response')
-                if raw_response:
-                    content = raw_response.content if hasattr(raw_response, 'content') else str(raw_response)
-                    processed_results.append(content)
-
-        results_text = "\n---\n".join(processed_results)
-        result_final = llm(reduce_prompt, map_results=results_text, final_query=question)
-
-        # Get token usage from raw response
-        final_raw_response = result_final.get('raw_response')
-        reduce_input_tokens = 0
-        reduce_output_tokens = 0
-        if final_raw_response and hasattr(final_raw_response, 'usage_metadata') and final_raw_response.usage_metadata:
-            reduce_input_tokens = final_raw_response.usage_metadata["input_tokens"]
-            reduce_output_tokens = final_raw_response.usage_metadata["output_tokens"]
-
-        # Parse JSON response from reduce phase
-        reduce_json = result_final.get('json', {})
-        if reduce_json:
-            clean_answer = reduce_json.get("answer", "")
-            clean_reasoning = reduce_json.get("reasoning", "No reasoning provided")
-            clean_evidence = reduce_json.get("evidence", [])
-        else:
-            # Fallback to raw response content
-            if final_raw_response:
-                clean_answer = final_raw_response.content if hasattr(final_raw_response, 'content') else str(final_raw_response)
-            else:
-                clean_answer = str(result_final)
-            clean_reasoning = "No reasoning provided"
-            clean_evidence = []
-
-        # Store the LLM answer and reasoning directly in the qa_pair dictionary
-        qa_pair["llm_answer"] = clean_answer
-        qa_pair["llm_reasoning"] = clean_reasoning
-        qa_pair["llm_evidence"] = clean_evidence
-
-        # Store token usage statistics
-        qa_pair["token_stats"] = {
-            "map_phase": {
-                "input_tokens": map_input_tokens,
-                "output_tokens": map_output_tokens
-            },
-            "reduce_phase": {
-                "input_tokens": reduce_input_tokens,
-                "output_tokens": reduce_output_tokens
-            },
-            "total": {
-                "input_tokens": map_input_tokens + reduce_input_tokens,
-                "output_tokens": map_output_tokens + reduce_output_tokens
-            }
+    print(f"Processing {len(qa_data)} QA pairs with {max_concurrent_qa} concurrent workers...")
+    
+    # Process QA pairs in parallel
+    with concurrent.futures.ThreadPoolExecutor(max_workers=max_concurrent_qa) as executor:
+        future_to_qa = {
+            executor.submit(process_single_qa, qa_pair, llm, chunk_size, chunk_overlap): i 
+            for i, qa_pair in enumerate(qa_data)
         }
+        
+        for future in tqdm(
+            concurrent.futures.as_completed(future_to_qa), 
+            total=len(qa_data), 
+            desc="Processing QA pairs"
+        ):
+            qa_idx = future_to_qa[future]
+            try:
+                updated_qa_pair = future.result()
+                # The qa_data list is already updated in-place inside process_single_qa
+                # print(f"Completed QA pair {qa_idx+1}/{len(qa_data)}: {qa_data[qa_idx]['doc_name']}")
+            except Exception as e:
+                print(f"Error processing QA pair {qa_idx+1}: {e}")
+                qa_data[qa_idx]["llm_answer"] = "Error during processing"
+                qa_data[qa_idx]["error"] = str(e)
 
     # Evaluate using LLM judge
     print("Evaluating answers using LLM judge...")

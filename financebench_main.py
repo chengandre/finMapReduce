@@ -1,5 +1,5 @@
 from mapreduce_qa import process_financebench_qa
-from utils import GPT
+from utils import GPT, RateLimitedGPT
 import argparse
 
 
@@ -23,10 +23,12 @@ def main():
                       help='Maximum number of tokens for the LLM')
     parser.add_argument('--provider', type=str, default="openrouter",
                       help='Provider of the LLM')
+    parser.add_argument('--max_concurrent_qa', type=int, default=20,
+                      help='Maximum number of QA pairs to process concurrently')
     args = parser.parse_args()
 
     print(f"Loading model: {args.model_name}")
-    llm = GPT(model_name=args.model_name, temperature=args.temperature, max_tokens=args.max_tokens, provider=args.provider)
+    llm = RateLimitedGPT(model_name=args.model_name, temperature=args.temperature, max_tokens=args.max_tokens, provider=args.provider)
 
     print(f"Processing {args.num_samples if args.num_samples else 'all'} samples from {args.jsonl_path}")
     results = process_financebench_qa(
@@ -35,7 +37,8 @@ def main():
         llm=llm,
         num_samples=args.num_samples,
         chunk_size=args.chunk_size,
-        chunk_overlap=args.chunk_overlap
+        chunk_overlap=args.chunk_overlap,
+        max_concurrent_qa=args.max_concurrent_qa
     )
 
     # Print summary results
