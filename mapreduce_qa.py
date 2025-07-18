@@ -286,16 +286,21 @@ def evaluate_with_llm_judge(llm, qa_data, batch_size=5):
         # Submit all batch processing tasks
         future_to_batch = {executor.submit(_process_batch, batch_data): batch_data for batch_data in batches}
 
-        # Collect results as they complete
-        for future in concurrent.futures.as_completed(future_to_batch):
-            try:
-                result = future.result()
-                batch_results.append(result)
-                print(f"Completed judge batch {result['batch_idx'] + 1}/{len(batches)}")
-            except Exception as e:
-                batch_data = future_to_batch[future]
-                batch_idx = batch_data[0]
-                print(f"Error in judge batch {batch_idx + 1}: {e}")
+        # Collect results as they complete with a progress bar
+        with tqdm(total=len(batches), desc="Evaluating batches") as pbar:
+            for future in concurrent.futures.as_completed(future_to_batch):
+                try:
+                    result = future.result()
+                    batch_results.append(result)
+                    batch_idx = result['batch_idx']
+                    pbar.update(1)
+                    if not result['success']:
+                        pbar.write(f"Error in batch {batch_idx + 1}: {result.get('error', 'Unknown error')}")
+                except Exception as e:
+                    batch_data = future_to_batch[future]
+                    batch_idx = batch_data[0]
+                    pbar.write(f"Error in judge batch {batch_idx + 1}: {e}")
+                    pbar.update(1)
 
     # Sort results by batch index to maintain order
     batch_results.sort(key=lambda x: x['batch_idx'])
@@ -372,10 +377,31 @@ def process_single_qa(qa_pair, llm, chunk_size=36000, chunk_overlap=1000):
     def process_chunk(chunk):
         return llm(map_prompt, context=chunk.page_content, final_query=question)
 
-    # print(f"Map phase started for {doc_name}")
-    with concurrent.futures.ThreadPoolExecutor(len(docs)) as executor:
-        results = list(executor.map(process_chunk, docs))
-    # print(f"Map phase completed for {doc_name}")
+    # Process chunks in parallel with executor
+    chunks_count = len(docs)
+    results = []
+
+    # Use a smaller progress bar description to fit in console
+    doc_basename = os.path.basename(doc_name)
+    if len(doc_basename) > 20:
+        doc_basename = doc_basename[:17] + "..."
+
+    with concurrent.futures.ThreadPoolExecutor(min(chunks_count, 10)) as executor:
+        # Submit all chunk processing tasks
+        futures = {
+            executor.submit(process_chunk, chunk): i
+            for i, chunk in enumerate(docs)
+        }
+
+        # Process as completed with silent progress tracking
+        for future in concurrent.futures.as_completed(futures):
+            try:
+                result = future.result()
+                results.append(result)
+            except Exception as e:
+                # If a chunk fails, add a placeholder result
+                print(f"Error processing chunk in {doc_basename}: {e}")
+                results.append({"error": str(e)})
 
     # Count output tokens from map phase
     for result in results:
@@ -477,28 +503,32 @@ def process_financebench_qa(jsonl_path, model_name, llm, num_samples=None, chunk
 
     t1 = time.time()
     print(f"Processing {len(qa_data)} QA pairs with {max_concurrent_qa} concurrent workers...")
-    
+
     # Process QA pairs in parallel
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_concurrent_qa) as executor:
+        # Submit all QA processing tasks
         future_to_qa = {
-            executor.submit(process_single_qa, qa_pair, llm, chunk_size, chunk_overlap): i 
+            executor.submit(process_single_qa, qa_pair, llm, chunk_size, chunk_overlap): i
             for i, qa_pair in enumerate(qa_data)
         }
-        
-        for future in tqdm(
-            concurrent.futures.as_completed(future_to_qa), 
-            total=len(qa_data), 
-            desc="Processing QA pairs"
-        ):
-            qa_idx = future_to_qa[future]
-            try:
-                updated_qa_pair = future.result()
-                # The qa_data list is already updated in-place inside process_single_qa
-                # print(f"Completed QA pair {qa_idx+1}/{len(qa_data)}: {qa_data[qa_idx]['doc_name']}")
-            except Exception as e:
-                print(f"Error processing QA pair {qa_idx+1}: {e}")
-                qa_data[qa_idx]["llm_answer"] = "Error during processing"
-                qa_data[qa_idx]["error"] = str(e)
+
+        # Create progress bar
+        with tqdm(total=len(qa_data), desc="Processing QA pairs", unit="pair") as pbar:
+            for future in concurrent.futures.as_completed(future_to_qa):
+                qa_idx = future_to_qa[future]
+                try:
+                    updated_qa_pair = future.result()
+                    doc_name = qa_data[qa_idx]['doc_name']
+                    pbar.update(1)
+                    pbar.set_postfix({"file": os.path.basename(doc_name)})
+                except Exception as e:
+                    pbar.write(f"Error processing QA pair {qa_idx+1}: {e}")
+                    qa_data[qa_idx]["llm_answer"] = "Error during processing"
+                    qa_data[qa_idx]["error"] = str(e)
+                    pbar.update(1)
+
+    process_time = time.time() - t1
+    print(f"QA processing completed in {process_time:.1f} seconds ({process_time/len(qa_data):.1f}s per question)")
 
     # Evaluate using LLM judge
     print("Evaluating answers using LLM judge...")

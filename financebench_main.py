@@ -9,7 +9,7 @@ def main():
                       help='Path to the financebench jsonl file')
     parser.add_argument('--model_name', type=str, default="deepseek/deepseek-r1-0528:free",
                       help='Name of the OpenAI model to use')
-    parser.add_argument('--num_samples', type=int, default=10,
+    parser.add_argument('--num_samples', type=int, default=None,
                       help='Number of samples to process from the dataset')
     parser.add_argument('--temperature', type=float, default=0.01,
                       help='Temperature parameter for the LLM')
