@@ -815,6 +815,401 @@ Content:
         return raw_content
 
 
+class SimpleRAG:
+    """Main orchestrator class for the RAG system"""
+
+    def __init__(self,
+                 embedding_model: str = "all-MiniLM-L6-v2",
+                 chunk_size: int = 1000,
+                 chunk_overlap: int = 200,
+                 llm_model: str = "gpt-4o-mini",
+                 use_local_embeddings: bool = True):
+        """
+        Initialize the SimpleRAG system
+
+        Args:
+            embedding_model: Embedding model to use (local or OpenAI)
+            chunk_size: Size of document chunks
+            chunk_overlap: Overlap between chunks
+            llm_model: LLM model for answer generation
+            use_local_embeddings: Whether to use local embeddings
+        """
+        if not LANGCHAIN_AVAILABLE:
+            raise ImportError("langchain is required for SimpleRAG system")
+        if not UTILS_AVAILABLE:
+            raise ImportError("utils module is required for SimpleRAG system")
+            
+        self.document_processor = DocumentProcessor(chunk_size, chunk_overlap)
+        self.vector_store = VectorStore(embedding_model, use_local_embeddings)
+        self.query_processor = QueryProcessor(llm_model)
+        self.document_ids = set()
+
+        logger.info("SimpleRAG system initialized successfully")
+
+    def ingest_document(self, document_name: str, document_id: str,
+                       overwrite: bool = False,
+                       on_duplicate: str = "error") -> bool:
+        """
+        Ingest a document with associated metadata
+
+        Args:
+            document_name: Name of the document file (e.g., "apple_2020_10k")
+                          load_pdf_chunk will automatically search for the right documents in the right directories
+            document_id: Unique identifier for the document
+            overwrite: Whether to overwrite existing document with same ID (deprecated, use on_duplicate)
+            on_duplicate: How to handle duplicate document IDs:
+                         - "error": Raise DuplicateDocumentError (default)
+                         - "skip": Skip ingestion and return False
+                         - "overwrite": Replace existing document
+
+        Returns:
+            True if successful, False if skipped
+
+        Raises:
+            ValidationError: If inputs are invalid
+            FileValidationError: If file validation fails
+            DocumentProcessingError: If document processing fails
+            DuplicateDocumentError: If document ID already exists and on_duplicate="error"
+        """
+        try:
+            logger.info(f"Ingesting document: {document_name} with ID: {document_id}")
+
+            # Validate inputs
+            ValidationUtils.validate_document_name(document_name)
+            ValidationUtils.validate_document_id(document_id)
+
+            # Validate on_duplicate parameter
+            valid_duplicate_options = {"error", "skip", "overwrite"}
+            if on_duplicate not in valid_duplicate_options:
+                raise ValidationError(
+                    f"Invalid on_duplicate option '{on_duplicate}'. "
+                    f"Must be one of: {', '.join(valid_duplicate_options)}"
+                )
+
+            # Handle deprecated overwrite parameter
+            if overwrite and on_duplicate == "error":
+                logger.warning("The 'overwrite' parameter is deprecated. Use on_duplicate='overwrite' instead.")
+                on_duplicate = "overwrite"
+
+            # Check for duplicate document ID
+            if document_id in self.document_ids:
+                if on_duplicate == "error":
+                    available_ids = sorted(list(self.document_ids))
+                    raise DuplicateDocumentError(
+                        document_id,
+                        f"Document ID '{document_id}' already exists. "
+                        f"Available options: use on_duplicate='skip' or on_duplicate='overwrite'. "
+                        f"Existing document IDs: {available_ids}"
+                    )
+                elif on_duplicate == "skip":
+                    logger.info(f"Skipping ingestion of document ID '{document_id}' (already exists)")
+                    return False
+                elif on_duplicate == "overwrite":
+                    logger.info(f"Overwriting existing document ID '{document_id}'")
+
+            # Process document using DocumentProcessor
+            try:
+                chunks = self.document_processor.process_document(document_name, document_id)
+            except (FileValidationError, ValidationError):
+                # Re-raise validation errors as-is
+                raise
+            except DocumentProcessingError as e:
+                # Enhance error message with context
+                raise DocumentProcessingError(
+                    f"Failed to process document '{document_name}' with ID '{document_id}': {str(e)}"
+                )
+
+            # Validate processing results
+            if not chunks:
+                raise DocumentProcessingError(
+                    f"No chunks generated for document '{document_name}'. "
+                    "The document may be empty or could not be processed."
+                )
+
+            # Add chunks to vector store
+            try:
+                self.vector_store.add_documents(chunks)
+            except Exception as e:
+                raise DocumentProcessingError(
+                    f"Failed to add document '{document_name}' to vector store: {str(e)}"
+                )
+
+            # Track document ID
+            self.document_ids.add(document_id)
+
+            logger.info(f"Successfully ingested document '{document_name}' with ID '{document_id}' ({len(chunks)} chunks)")
+            return True
+
+        except (ValidationError, FileValidationError, DocumentProcessingError, DuplicateDocumentError):
+            # Re-raise known errors as-is
+            raise
+        except Exception as e:
+            logger.error(f"Unexpected error ingesting document {document_name}: {str(e)}")
+            raise DocumentProcessingError(f"Unexpected error ingesting document '{document_name}': {str(e)}")
+
+    def query(self, question: str, document_id: Optional[str] = None,
+              top_k: int = 5) -> QueryResponse:
+        """
+        Query the system with optional document filtering
+
+        Args:
+            question: The question to ask
+            document_id: Optional document ID to filter results
+            top_k: Number of top results to retrieve
+
+        Returns:
+            QueryResponse with answer and metadata
+
+        Raises:
+            ValidationError: If inputs are invalid
+            QueryError: If query processing fails
+        """
+        start_time = time.time()
+
+        try:
+            logger.info(f"Processing query: {question[:50] if question else 'None'}... (document_id: {document_id}, top_k: {top_k})")
+
+            # Comprehensive input validation
+            clean_question = ValidationUtils.validate_query(question)
+            validated_top_k = ValidationUtils.validate_top_k(top_k)
+
+            # Validate document_id if provided
+            if document_id is not None:
+                ValidationUtils.validate_document_id(document_id)
+
+                if document_id not in self.document_ids:
+                    available_ids = sorted(list(self.document_ids))
+                    if not available_ids:
+                        raise QueryError(
+                            f"Document ID '{document_id}' not found. No documents have been ingested yet. "
+                            "Please ingest documents before querying."
+                        )
+                    else:
+                        raise QueryError(
+                            f"Document ID '{document_id}' not found. "
+                            f"Available document IDs: {available_ids}"
+                        )
+
+            # Check if any documents have been ingested
+            if len(self.document_ids) == 0:
+                raise QueryError(
+                    "No documents have been ingested yet. Please ingest at least one document before querying."
+                )
+
+            # Perform similarity search
+            try:
+                search_results = self.vector_store.similarity_search(
+                    query=clean_question,
+                    document_id=document_id,
+                    top_k=validated_top_k
+                )
+            except Exception as e:
+                raise QueryError(f"Vector search failed: {str(e)}")
+
+            # Handle no results case
+            if not search_results:
+                query_time = time.time() - start_time
+                no_results_message = self._generate_no_results_message(document_id)
+                return QueryResponse(
+                    answer=no_results_message,
+                    source_chunks=[],
+                    document_ids=[],
+                    confidence_scores=[],
+                    query_time=query_time
+                )
+
+            # Extract and validate chunks and scores
+            source_chunks = []
+            confidence_scores = []
+
+            for doc, score in search_results:
+                if doc is None:
+                    logger.warning("Received None document in search results, skipping")
+                    continue
+
+                if not hasattr(doc, 'page_content'):
+                    logger.warning("Received document without page_content attribute, skipping")
+                    continue
+
+                if not doc.page_content or not doc.page_content.strip():
+                    logger.warning("Received document with empty content, skipping")
+                    continue
+
+                source_chunks.append(doc)
+                confidence_scores.append(float(score) if score is not None else 0.0)
+
+            # Final validation of results
+            if not source_chunks:
+                query_time = time.time() - start_time
+                return QueryResponse(
+                    answer="I found some results but they contained no valid content to answer your question.",
+                    source_chunks=[],
+                    document_ids=[],
+                    confidence_scores=[],
+                    query_time=query_time
+                )
+
+            # Extract unique document IDs from results
+            result_document_ids = []
+            for chunk in source_chunks:
+                doc_id = chunk.metadata.get("document_id", "Unknown")
+                if doc_id not in result_document_ids:
+                    result_document_ids.append(doc_id)
+
+            # Generate answer using QueryProcessor
+            try:
+                answer = self.query_processor.generate_answer(clean_question, source_chunks)
+            except Exception as e:
+                logger.error(f"Answer generation failed: {str(e)}")
+                # Provide fallback response
+                answer = (
+                    f"I found relevant information but encountered an error generating the answer: {str(e)}. "
+                    f"Found {len(source_chunks)} relevant chunks from documents: {', '.join(result_document_ids)}"
+                )
+
+            query_time = time.time() - start_time
+
+            logger.info(f"Query completed in {query_time:.2f}s, found {len(source_chunks)} relevant chunks")
+
+            return QueryResponse(
+                answer=answer,
+                source_chunks=source_chunks,
+                document_ids=result_document_ids,
+                confidence_scores=confidence_scores,
+                query_time=query_time
+            )
+
+        except (ValidationError, QueryError):
+            # Re-raise known errors as-is
+            raise
+        except Exception as e:
+            logger.error(f"Unexpected error processing query: {str(e)}")
+            raise QueryError(f"Unexpected error processing query: {str(e)}")
+
+    def _generate_no_results_message(self, document_id: Optional[str]) -> str:
+        """
+        Generate appropriate message when no results are found
+
+        Args:
+            document_id: Document ID that was searched (if any)
+
+        Returns:
+            Appropriate no-results message
+        """
+        if document_id:
+            return (
+                f"I couldn't find any relevant information in document '{document_id}' to answer your question. "
+                f"You might try rephrasing your question or searching across all documents."
+            )
+        else:
+            available_docs = sorted(list(self.document_ids))
+            return (
+                f"I couldn't find any relevant information to answer your question across all {len(available_docs)} documents. "
+                f"You might try rephrasing your question or searching within a specific document. "
+                f"Available documents: {', '.join(available_docs[:5])}{'...' if len(available_docs) > 5 else ''}"
+            )
+
+    def get_document_ids(self) -> List[str]:
+        """Get list of all ingested document IDs"""
+        return sorted(list(self.document_ids))
+
+    def check_document_exists(self, document_id: str) -> bool:
+        """
+        Check if a document ID already exists
+
+        Args:
+            document_id: Document ID to check
+
+        Returns:
+            True if document exists, False otherwise
+        """
+        try:
+            ValidationUtils.validate_document_id(document_id)
+            return document_id in self.document_ids
+        except ValidationError:
+            return False
+
+    def get_duplicate_handling_options(self, document_id: str) -> Dict[str, str]:
+        """
+        Get available options for handling duplicate document IDs
+
+        Args:
+            document_id: Document ID that already exists
+
+        Returns:
+            Dictionary of option codes and descriptions
+        """
+        if document_id not in self.document_ids:
+            return {}
+
+        return {
+            "skip": f"Skip ingestion and keep existing document '{document_id}'",
+            "overwrite": f"Replace existing document '{document_id}' with new content",
+            "error": f"Raise an error (default behavior)"
+        }
+
+    def get_status(self) -> Dict[str, Any]:
+        """Get system status information"""
+        vector_stats = self.vector_store.get_stats()
+
+        return {
+            "total_documents": len(self.document_ids),
+            "document_ids": sorted(list(self.document_ids)),
+            "embedding_model": self.vector_store.embedding_model,
+            "use_local_embeddings": self.vector_store.use_local,
+            "chunk_size": self.document_processor.chunk_size,
+            "chunk_overlap": self.document_processor.chunk_overlap,
+            "vector_store_documents": vector_stats.get("total_documents", 0),
+            "system_ready": len(self.document_ids) > 0
+        }
+
+    def clear_documents(self) -> None:
+        """Clear all ingested documents and reset the system"""
+        self.document_ids.clear()
+        self.vector_store.clear()
+        logger.info("All documents cleared from the system")
+
+    def save_index(self, folder_path: str) -> None:
+        """Save the vector index to disk for persistence"""
+        try:
+            os.makedirs(folder_path, exist_ok=True)
+
+            # Save vector store
+            self.vector_store.save_local(folder_path)
+
+            # Save document IDs
+            ids_file = os.path.join(folder_path, "document_ids.pkl")
+            with open(ids_file, 'wb') as f:
+                pickle.dump(self.document_ids, f)
+
+            logger.info(f"Index and metadata saved to {folder_path}")
+
+        except Exception as e:
+            logger.error(f"Error saving index: {str(e)}")
+            raise SimpleRAGError(f"Failed to save index: {str(e)}")
+
+    def load_index(self, folder_path: str) -> None:
+        """Load the vector index from disk"""
+        try:
+            # Load vector store
+            self.vector_store.load_local(folder_path)
+
+            # Load document IDs
+            ids_file = os.path.join(folder_path, "document_ids.pkl")
+            if os.path.exists(ids_file):
+                with open(ids_file, 'rb') as f:
+                    self.document_ids = pickle.load(f)
+            else:
+                logger.warning("No document_ids.pkl found, document IDs may be incomplete")
+                self.document_ids = set()
+
+            logger.info(f"Index and metadata loaded from {folder_path}")
+
+        except Exception as e:
+            logger.error(f"Error loading index: {str(e)}")
+            raise SimpleRAGError(f"Failed to load index: {str(e)}")
+
+
 if __name__ == "__main__":
     # Basic test to verify imports and initialization
     try:
@@ -868,6 +1263,19 @@ if __name__ == "__main__":
                 print(f"QueryProcessor test failed: {qp_error}")
         else:
             print("Required dependencies not available, skipping query processor test")
+            
+        # Test complete SimpleRAG system if available
+        if UTILS_AVAILABLE and LANGCHAIN_AVAILABLE:
+            print("Testing complete SimpleRAG system...")
+            try:
+                rag = SimpleRAG()
+                status = rag.get_status()
+                print(f"SimpleRAG system status: {status}")
+                print("SimpleRAG system initialized successfully!")
+            except Exception as rag_error:
+                print(f"SimpleRAG system test failed: {rag_error}")
+        else:
+            print("Required dependencies not available, skipping SimpleRAG system test")
             
     except Exception as e:
         print(f"Error testing utilities: {e}")
