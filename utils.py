@@ -6,6 +6,8 @@ import json5
 import tiktoken
 import threading
 import subprocess
+import uuid
+import logging
 
 from pathlib import Path
 from pydantic import SecretStr
@@ -16,6 +18,9 @@ from langchain.text_splitter import CharacterTextSplitter
 from langchain_community.document_loaders import PyPDFLoader, PDFMinerLoader, PyMuPDFLoader, UnstructuredPDFLoader
 
 load_dotenv()
+
+# Suppress langchain text splitter warnings
+logging.getLogger("langchain_text_splitters.base").setLevel(logging.ERROR)
 
 class GPT:
     def __init__(self, model_name, temperature, max_tokens, provider="openrouter"):
@@ -38,7 +43,7 @@ class GPT:
             api_key = SecretStr(os.getenv("OPENROUTER_API_KEY", ""))
             base_url = "https://openrouter.ai/api/v1"
         else:  # default to openai
-            api_key = SecretStr(os.getenv("OPENAI_API_KEY", ""))
+            api_key = SecretStr(os.getenv("SELF_OPENAI_API_KEY", ""))
             base_url = None
 
         self.llm = ChatOpenAI(
@@ -50,9 +55,27 @@ class GPT:
             max_retries=50
         )
 
+        # Create directory for saving prompts if it doesn't exist
+        self.prompts_dir = Path("prompts_log")
+        self.prompts_dir.mkdir(exist_ok=True)
+
     def __call__(self, prompt, **kwargs):
         max_retries = 50
         base_delay = 2
+
+        # Generate unique ID for this prompt
+        prompt_id = str(uuid.uuid4())
+        prompt_file = self.prompts_dir / f"prompt_{prompt_id}.json"
+
+        # Save the prompt to file
+        prompt_data = {
+            "kwargs": kwargs,
+            "model": self.model_name,
+            "timestamp": time.time()
+        }
+
+        with open(prompt_file, "w", encoding="utf-8") as f:
+            json.dump(prompt_data, f, indent=2)
 
         for attempt in range(max_retries):
             try:
@@ -60,6 +83,11 @@ class GPT:
                 response = chain.invoke(kwargs)
 
                 parsed_json = self._parse_json(response)
+
+                # Success - delete the prompt file
+                if prompt_file.exists():
+                    prompt_file.unlink()
+
                 return {
                     'json': parsed_json,
                     'raw_response': response
@@ -86,6 +114,7 @@ class GPT:
                 is_retryable = True
 
                 if not is_retryable or attempt == max_retries - 1:
+                    # Keep the prompt file for analysis (don't delete it)
                     raise e
 
                 delay = min(base_delay * (2 ** attempt), 60)
@@ -148,7 +177,7 @@ class GPT:
 
 class TokenBucketRateLimiter:
     """Rate limiter using token bucket algorithm"""
-    
+
     def __init__(self, calls_per_minute=20, burst_size=8):
         """
         Args:
@@ -160,7 +189,7 @@ class TokenBucketRateLimiter:
         self.tokens = float(burst_size)      # Start with full bucket
         self.last_update = time.time()       # Last time we added tokens
         self.lock = threading.Lock()         # Thread safety
-    
+
     def acquire_token(self):
         """Wait if necessary to respect rate limit (iterative approach)"""
         while True:
@@ -178,24 +207,24 @@ class TokenBucketRateLimiter:
                 # Calculate wait time if no token is available
                 tokens_needed = 1.0 - self.tokens
                 wait_time = tokens_needed / self.rate
-            
+
             if wait_time > 0:
                 time.sleep(wait_time)
 
 
 class RateLimitedGPT(GPT):
     """GPT wrapper with shared token bucket rate limiting"""
-    
+
     # Class-level rate limiter shared across all instances
     _rate_limiter = TokenBucketRateLimiter(
         calls_per_minute=500,    # Conservative API limit
         burst_size=100           # Allow bursts for chunk processing
     )
-    
+
     def __call__(self, prompt, **kwargs):
         # Wait for token before making API call
         self._rate_limiter.acquire_token()
-        
+
         # Make the actual API call (with existing retry logic)
         return super().__call__(prompt, **kwargs)
 

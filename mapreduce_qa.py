@@ -169,13 +169,13 @@ def load_financebench_data(jsonl_path, num_samples=None):
 
         # Create a QA pair with the necessary information
         qa_pair = {
-            "question": item["question"],
-            "question_type": item["question_type"],
-            "question_reasoning": item["question_reasoning"],
-            "answer": item["answer"],
-            "company": item["company"],
             "doc_name": item["doc_name"],
-            "evidence": [ev["evidence_text"] for ev in item["evidence"]]
+            "question": item["question"],
+            "answer": item["answer"],
+            "justification": item["justification"] if item["justification"] else "No justification provided",
+            "evidence": [ev["evidence_text"] for ev in item["evidence"]],
+            "question_type": item["question_type"],
+            "question_reasoning": item["question_reasoning"]
         }
 
         qa_data.append(qa_pair)
@@ -209,6 +209,8 @@ def evaluate_with_llm_judge(llm, qa_data, batch_size=5):
 
         for j in range(i, end_idx):
             sample = {
+                "llm_evidence": qa_data[j]["evidence"],
+                "llm_reasoning": qa_data[j]["llm_reasoning"],
                 "llm_answer": qa_data[j]["llm_answer"],
                 "golden_answer": qa_data[j]["answer"],
                 "question": qa_data[j]["question"]
@@ -231,6 +233,12 @@ def evaluate_with_llm_judge(llm, qa_data, batch_size=5):
                 f"    <query>\n"
                 f"      {sample['question']}\n"
                 f"    </query>\n"
+                f"    <llm_evidence>\n"
+                f"      {sample['llm_evidence']}\n"
+                f"    </llm_evidence>\n"
+                f"    <llm_reasoning>\n"
+                f"      {sample['llm_reasoning']}\n"
+                f"    </llm_reasoning>\n"
                 f"    <answers_to_compare>\n"
                 f"      <llm_answer>\n"
                 f"        {sample['llm_answer']}\n"
@@ -320,6 +328,8 @@ def evaluate_with_llm_judge(llm, qa_data, batch_size=5):
 
     # Calculate overall statistics
     total_correct = 0
+    total_coherent = 0
+    total_deviated = 0
     total_incorrect = 0
     total_no_answer = 0
     total_samples = 0
@@ -328,6 +338,10 @@ def evaluate_with_llm_judge(llm, qa_data, batch_size=5):
         judgment = qa_item.get("judgment", "Error")
         if judgment == "Correct":
             total_correct += 1
+        elif judgment == "Coherent":
+            total_coherent += 1
+        elif judgment == "Deviated":
+            total_deviated += 1
         elif judgment == "Incorrect":
             total_incorrect += 1
         elif judgment == "No answer":
@@ -337,6 +351,8 @@ def evaluate_with_llm_judge(llm, qa_data, batch_size=5):
     # Prepare overall results
     results = {
         "correct": total_correct,
+        "coherent": total_coherent,
+        "deviated": total_deviated,
         "incorrect": total_incorrect,
         "no_answer": total_no_answer,
         "total": total_samples,
@@ -480,6 +496,9 @@ def process_single_qa(qa_pair, llm, chunk_size=36000, chunk_overlap=1000):
         }
     }
 
+    # Print completion message for this document
+    # print(f"Completed processing: {os.path.basename(doc_name)}")
+
     return qa_pair
 
 def process_financebench_qa(jsonl_path, model_name, llm, num_samples=None, chunk_size=36000, chunk_overlap=1000, max_concurrent_qa=3):
@@ -500,6 +519,13 @@ def process_financebench_qa(jsonl_path, model_name, llm, num_samples=None, chunk
     """
     print(f"Loading {num_samples if num_samples else 'all'} samples from financebench data...")
     qa_data = load_financebench_data(jsonl_path, num_samples)
+
+    # # Print all document names before processing
+    # print("\n=== Documents to be processed ===")
+    # doc_names = [qa_pair["doc_name"] for qa_pair in qa_data]
+    # for i, doc_name in enumerate(doc_names):
+    #     print(f"{i+1}/{len(doc_names)}: {os.path.basename(doc_name)}")
+    # print("===============================\n")
 
     t1 = time.time()
     print(f"Processing {len(qa_data)} QA pairs with {max_concurrent_qa} concurrent workers...")

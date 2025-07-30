@@ -47,6 +47,8 @@ def main():
     print(f"Total samples: {eval_summary['total']}")
     print(f"Correct answers: {eval_summary['correct']}")
     print(f"Incorrect answers: {eval_summary['incorrect']}")
+    print(f"Coherent answers: {eval_summary['coherent']}")
+    print(f"Deviated answers: {eval_summary['deviated']}")
     print(f"No answers: {eval_summary['no_answer']}")
     print(f"Accuracy: {eval_summary['accuracy']:.2%}")
     print(f"Time taken: {results['time_taken']:.2f} seconds")

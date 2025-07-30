@@ -48,6 +48,8 @@ template: |
   Evaluation Criteria:
   For each triple, your judgement must be one of the following three strings:
     - "Correct": If the LLM answer matches the golden answer or is partially correct. Small rounding errors are allowed. If the LLM answer is a subset of the golden answer, it is still considered correct.
+    - "Coherent": If the LLM answer does not exactly match the golden answer but is coherent with the evidence and the query.
+    - "Deviated": If the LLM answer deviates from the golden answer by a small margin, but larger than small rounding errors.
     - "Incorrect": If the LLM answer attempts to answer the query but does not match the golden answer.
     - "No answer": If the LLM refused to answer the query or stated there was not enough information.
 
