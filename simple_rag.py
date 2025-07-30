@@ -260,10 +260,19 @@ class DuplicateDocumentError(DocumentProcessingError):
 try:
     from langchain.schema import Document
     from langchain_community.vectorstores import FAISS
+    from langchain.prompts import PromptTemplate, load_prompt
     LANGCHAIN_AVAILABLE = True
 except ImportError:
     LANGCHAIN_AVAILABLE = False
     print("Warning: langchain not available")
+
+# Import existing utilities
+try:
+    from utils import load_pdf_chunk, GPT
+    UTILS_AVAILABLE = True
+except ImportError:
+    UTILS_AVAILABLE = False
+    print("Warning: utils module not available")
 
 # Local embeddings imports and setup
 try:
@@ -456,6 +465,356 @@ class VectorStore:
             raise SimpleRAGError(f"Failed to load vector store: {str(e)}")
 
 
+class DocumentProcessor:
+    """Handles document loading and chunking using existing utilities"""
+
+    def __init__(self, chunk_size: int = 1000, chunk_overlap: int = 200):
+        if not UTILS_AVAILABLE:
+            raise ImportError("utils module is required for document processing")
+            
+        # Validate chunk parameters
+        self.chunk_size, self.chunk_overlap = ValidationUtils.validate_chunk_parameters(
+            chunk_size, chunk_overlap
+        )
+        logger.info(f"DocumentProcessor initialized with chunk_size={self.chunk_size}, overlap={self.chunk_overlap}")
+
+    def validate_document_file(self, document_name: str) -> None:
+        """
+        Validate document file before processing
+
+        Args:
+            document_name: Name of the document to validate
+
+        Raises:
+            FileValidationError: If file validation fails
+        """
+        try:
+            # Basic name validation
+            ValidationUtils.validate_document_name(document_name)
+
+            # Note: We don't validate file existence here because load_pdf_chunk
+            # handles file discovery across multiple directories
+            logger.info(f"Document name validation passed for: {document_name}")
+
+        except ValidationError as e:
+            raise FileValidationError(f"File validation failed: {str(e)}")
+        except Exception as e:
+            raise FileValidationError(f"Unexpected error during file validation: {str(e)}")
+
+    def process_document(self, document_name: str, document_id: str) -> List['Document']:
+        """
+        Process a document using existing load_pdf_chunk function and add metadata
+
+        Args:
+            document_name: Name of the document file (e.g., "apple_2020_10k")
+                          load_pdf_chunk will automatically search for the right documents in the right directories
+            document_id: Unique identifier for the document (e.g., "APPLE_2020")
+
+        Returns:
+            List of Document objects with metadata
+
+        Raises:
+            FileValidationError: If file validation fails
+            DocumentProcessingError: If document processing fails
+        """
+        try:
+            logger.info(f"Processing document: {document_name} with ID: {document_id}")
+
+            # Validate inputs
+            self.validate_document_file(document_name)
+            ValidationUtils.validate_document_id(document_id)
+
+            # Use existing load_pdf_chunk function with marker method for best results
+            # load_pdf_chunk will automatically search for the document in appropriate directories
+            try:
+                chunks, token_count = load_pdf_chunk(
+                    pdf_file=document_name,
+                    chunk_size=self.chunk_size,
+                    chunk_overlap=self.chunk_overlap,
+                    method="marker"
+                )
+            except FileNotFoundError as e:
+                raise DocumentProcessingError(
+                    f"Document '{document_name}' not found. Please ensure the file exists in the expected directories. "
+                    f"Original error: {str(e)}"
+                )
+            except Exception as e:
+                # Handle various processing errors from load_pdf_chunk
+                error_msg = str(e).lower()
+                if "permission" in error_msg or "access" in error_msg:
+                    raise DocumentProcessingError(
+                        f"Permission denied accessing document '{document_name}'. "
+                        f"Please check file permissions. Original error: {str(e)}"
+                    )
+                elif "corrupt" in error_msg or "invalid" in error_msg or "format" in error_msg:
+                    raise DocumentProcessingError(
+                        f"Document '{document_name}' appears to be corrupted or in an unsupported format. "
+                        f"Please verify the file integrity. Original error: {str(e)}"
+                    )
+                else:
+                    raise DocumentProcessingError(
+                        f"Failed to load document '{document_name}': {str(e)}"
+                    )
+
+            # Validate processing results
+            if not chunks:
+                raise DocumentProcessingError(
+                    f"No content could be extracted from document '{document_name}'. "
+                    "The document may be empty, corrupted, or in an unsupported format."
+                )
+
+            if token_count == 0:
+                logger.warning(f"Document '{document_name}' processed but no tokens counted")
+
+            logger.info(f"Document processed: {len(chunks)} chunks, {token_count} tokens")
+
+            # Add metadata to each chunk
+            processed_chunks = []
+            for i, chunk in enumerate(chunks):
+                # Validate chunk content
+                if not chunk.page_content or not chunk.page_content.strip():
+                    logger.warning(f"Empty chunk {i} in document {document_name}, skipping")
+                    continue
+
+                # Create new metadata that includes our document_id
+                enhanced_metadata = {
+                    "document_id": document_id,
+                    "chunk_index": i,
+                    "source_name": document_name,
+                    "total_chunks": len(chunks),
+                    "chunk_size": len(chunk.page_content),
+                    **chunk.metadata  # Preserve existing metadata
+                }
+
+                # Create new Document with enhanced metadata
+                if LANGCHAIN_AVAILABLE:
+                    enhanced_chunk = Document(
+                        page_content=chunk.page_content,
+                        metadata=enhanced_metadata
+                    )
+                    processed_chunks.append(enhanced_chunk)
+                else:
+                    # Fallback if langchain not available
+                    processed_chunks.append(chunk)
+
+            # Final validation
+            if not processed_chunks:
+                raise DocumentProcessingError(
+                    f"No valid chunks could be created from document '{document_name}'. "
+                    "All chunks were empty or invalid."
+                )
+
+            logger.info(f"Added metadata to {len(processed_chunks)} chunks for document {document_id}")
+            return processed_chunks
+
+        except (FileValidationError, ValidationError):
+            # Re-raise validation errors as-is
+            raise
+        except DocumentProcessingError:
+            # Re-raise document processing errors as-is
+            raise
+        except Exception as e:
+            logger.error(f"Unexpected error processing document {document_name}: {str(e)}")
+            raise DocumentProcessingError(f"Unexpected error processing document {document_name}: {str(e)}")
+
+
+class QueryProcessor:
+    """Handles answer generation using existing GPT wrapper with structured prompts"""
+
+    def __init__(self, llm_model: str = "gpt-4o-mini", temperature: float = 0.1):
+        if not UTILS_AVAILABLE:
+            raise ImportError("utils module is required for query processing")
+            
+        self.llm = GPT(
+            model_name=llm_model,
+            temperature=temperature,
+            max_tokens=1500,
+            provider="openrouter"
+        )
+        logger.info(f"QueryProcessor initialized with model: {llm_model}")
+
+    def generate_answer(self, question: str, context_chunks: List['Document']) -> str:
+        """
+        Generate answer from retrieved context chunks using structured prompt
+
+        Args:
+            question: The user's question
+            context_chunks: List of relevant document chunks
+
+        Returns:
+            Generated answer with source attribution
+        """
+        if not context_chunks:
+            return "I couldn't find any relevant information to answer your question."
+
+        try:
+            # Format context from chunks
+            context = self._format_context(context_chunks)
+
+            # Create structured prompt similar to finMapReduce/prompts
+            prompt_template = load_prompt("prompts/rag_prompt.yml")
+
+            # Generate answer using the GPT wrapper
+            response = self.llm(prompt_template, context=context, question=question)
+
+            # Extract and process the structured response
+            answer = self._process_response(response, context_chunks)
+
+            logger.info(f"Generated answer for question: {question}...")
+            return answer
+
+        except Exception as e:
+            logger.error(f"Error generating answer: {str(e)}")
+            return f"I encountered an error while generating the answer: {str(e)}"
+
+    def _create_answer_prompt(self):
+        """
+        Load the structured prompt template from YAML file
+
+        Returns:
+            PromptTemplate for answer generation
+        """
+        return load_prompt("prompts/rag_prompt.yml")
+
+    def _format_context(self, chunks: List['Document']) -> str:
+        """
+        Format retrieved chunks into a structured context string
+
+        Args:
+            chunks: List of Document objects with content and metadata
+
+        Returns:
+            Formatted context string with metadata
+        """
+        if not chunks:
+            return ""
+
+        context_parts = []
+
+        for i, chunk in enumerate(chunks, 1):
+            # Extract metadata
+            doc_id = chunk.metadata.get("document_id", "Unknown")
+            chunk_index = chunk.metadata.get("chunk_index", "Unknown")
+            source_name = chunk.metadata.get("source_name", chunk.metadata.get("source_path", "Unknown"))
+
+            # Format each chunk with clear structure
+            context_part = f"""[Chunk {i}]
+Document ID: {doc_id}
+Chunk Index: {chunk_index}
+Source: {source_name}
+Content:
+{chunk.page_content.strip()}
+
+---"""
+            context_parts.append(context_part)
+
+        return "\n".join(context_parts)
+
+    def _process_response(self, response: Dict[str, Any], context_chunks: List['Document']) -> str:
+        """
+        Process the structured JSON response from the LLM
+
+        Args:
+            response: Response from GPT wrapper
+            context_chunks: Original context chunks for fallback
+
+        Returns:
+            Formatted answer with source attribution
+        """
+        try:
+            # Extract JSON response
+            if isinstance(response, dict) and 'json' in response:
+                json_response = response['json']
+            elif isinstance(response, dict) and 'raw_response' in response:
+                # Fallback to raw response if JSON parsing failed
+                return self._fallback_response(response['raw_response'].content, context_chunks)
+            else:
+                return self._fallback_response(str(response), context_chunks)
+
+            # Extract components from structured response
+            reasoning = json_response.get("reasoning", "")
+            evidence = json_response.get("evidence", [])
+            answer = json_response.get("answer", "")
+            confidence = json_response.get("confidence", "medium")
+            sources = json_response.get("sources", [])
+
+            # Format the final response
+            formatted_answer = self._format_final_answer(
+                answer, reasoning, evidence, confidence, sources
+            )
+
+            return formatted_answer
+
+        except Exception as e:
+            logger.warning(f"Error processing structured response: {str(e)}")
+            # Fallback to simple response processing
+            raw_content = response.get('raw_response', {}).content if isinstance(response, dict) else str(response)
+            return self._fallback_response(raw_content, context_chunks)
+
+    def _format_final_answer(self, answer: str, reasoning: str, evidence: List[str],
+                           confidence: str, sources: List[str]) -> str:
+        """
+        Format the final answer with all components
+
+        Args:
+            answer: Main answer text
+            reasoning: Reasoning process
+            evidence: Supporting evidence
+            confidence: Confidence level
+            sources: Source document IDs
+
+        Returns:
+            Formatted final answer
+        """
+        formatted_parts = []
+
+        # Main answer
+        if answer:
+            formatted_parts.append(answer)
+
+        # Add confidence indicator
+        if confidence:
+            formatted_parts.append(f"\n**Confidence:** {confidence.title()}")
+
+        # Add sources if available
+        if sources:
+            sources_text = ", ".join(sources)
+            formatted_parts.append(f"**Sources:** {sources_text}")
+
+        # Add evidence if available and not too verbose (limit to first 3 items)
+        if evidence:
+            limited_evidence = evidence[:3]  # Take only first 3 pieces of evidence
+            evidence_text = "\n".join([f"- {ev[:200]}..." if len(ev) > 200 else f"- {ev}" for ev in limited_evidence])
+            formatted_parts.append(f"**Supporting Evidence:**\n{evidence_text}")
+
+        return "\n\n".join(formatted_parts)
+
+    def _fallback_response(self, raw_content: str, context_chunks: List['Document']) -> str:
+        """
+        Fallback response processing when structured parsing fails
+
+        Args:
+            raw_content: Raw response content
+            context_chunks: Original context chunks
+
+        Returns:
+            Formatted response with basic source attribution
+        """
+        # Extract unique document IDs for source attribution
+        document_ids = set()
+        for chunk in context_chunks:
+            doc_id = chunk.metadata.get("document_id")
+            if doc_id:
+                document_ids.add(doc_id)
+
+        # Add basic source attribution
+        if document_ids:
+            sources_text = ", ".join(sorted(document_ids))
+            return f"{raw_content}\n\n**Sources:** {sources_text}"
+
+        return raw_content
+
+
 if __name__ == "__main__":
     # Basic test to verify imports and initialization
     try:
@@ -487,6 +846,28 @@ if __name__ == "__main__":
                 print(f"VectorStore test failed (expected if dependencies missing): {vs_error}")
         else:
             print("langchain not available, skipping vector store test")
+            
+        # Test DocumentProcessor initialization if available
+        if UTILS_AVAILABLE:
+            print("Testing DocumentProcessor initialization...")
+            try:
+                doc_processor = DocumentProcessor(chunk_size=1000, chunk_overlap=200)
+                print("DocumentProcessor working correctly!")
+            except Exception as dp_error:
+                print(f"DocumentProcessor test failed: {dp_error}")
+        else:
+            print("utils module not available, skipping document processor test")
+            
+        # Test QueryProcessor initialization if available
+        if UTILS_AVAILABLE and LANGCHAIN_AVAILABLE:
+            print("Testing QueryProcessor initialization...")
+            try:
+                query_processor = QueryProcessor()
+                print("QueryProcessor working correctly!")
+            except Exception as qp_error:
+                print(f"QueryProcessor test failed: {qp_error}")
+        else:
+            print("Required dependencies not available, skipping query processor test")
             
     except Exception as e:
         print(f"Error testing utilities: {e}")
