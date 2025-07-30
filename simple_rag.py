@@ -256,6 +256,15 @@ class DuplicateDocumentError(DocumentProcessingError):
         super().__init__(message)
 
 
+# LangChain imports
+try:
+    from langchain.schema import Document
+    from langchain_community.vectorstores import FAISS
+    LANGCHAIN_AVAILABLE = True
+except ImportError:
+    LANGCHAIN_AVAILABLE = False
+    print("Warning: langchain not available")
+
 # Local embeddings imports and setup
 try:
     from sentence_transformers import SentenceTransformer
@@ -265,7 +274,9 @@ except ImportError:
     print("Warning: sentence-transformers not available, falling back to OpenAI embeddings")
     try:
         from langchain_openai import OpenAIEmbeddings
+        OPENAI_EMBEDDINGS_AVAILABLE = True
     except ImportError:
+        OPENAI_EMBEDDINGS_AVAILABLE = False
         print("Warning: langchain_openai not available either")
 
 
@@ -312,6 +323,139 @@ class LocalEmbeddings:
         logger.info("Cleared embedding model cache")
 
 
+class VectorStore:
+    """Manages FAISS vector index and embeddings using LangChain's FAISS wrapper"""
+
+    def __init__(self, embedding_model: str = "all-MiniLM-L6-v2", use_local: bool = True):
+        if not LANGCHAIN_AVAILABLE:
+            raise ImportError("langchain is required for vector store functionality")
+            
+        self.embedding_model = embedding_model
+        self.use_local = use_local
+
+        if use_local and SENTENCE_TRANSFORMERS_AVAILABLE:
+            # Use local embeddings
+            self.embeddings = LocalEmbeddings(embedding_model)
+            logger.info(f"VectorStore initialized with local embedding model: {embedding_model}")
+        else:
+            # Fallback to OpenAI embeddings
+            if not SENTENCE_TRANSFORMERS_AVAILABLE:
+                logger.warning("sentence-transformers not available, using OpenAI embeddings")
+            if not OPENAI_EMBEDDINGS_AVAILABLE:
+                raise ImportError("Neither sentence-transformers nor OpenAI embeddings available")
+            self.embeddings = OpenAIEmbeddings(model="text-embedding-ada-002")
+            logger.info("VectorStore initialized with OpenAI embeddings")
+
+        self.vector_store = None  # LangChain FAISS vector store
+
+    def add_documents(self, documents: List['Document']) -> None:
+        """Add documents to the vector store"""
+        if not documents:
+            logger.warning("No documents provided to add_documents")
+            return
+
+        logger.info(f"Adding {len(documents)} documents to vector store")
+
+        try:
+            if self.vector_store is None:
+                # Create new FAISS vector store with first batch of documents
+                logger.info("Creating new FAISS vector store...")
+                self.vector_store = FAISS.from_documents(documents, self.embeddings)
+                logger.info(f"Created FAISS vector store with {len(documents)} documents")
+            else:
+                # Add documents to existing vector store
+                logger.info("Adding documents to existing FAISS vector store...")
+                self.vector_store.add_documents(documents)
+                logger.info(f"Added {len(documents)} documents to existing vector store")
+
+            total_docs = len(self.vector_store.docstore._dict)
+            logger.info(f"Total documents in vector store: {total_docs}")
+
+        except Exception as e:
+            logger.error(f"Error adding documents to vector store: {str(e)}")
+            raise SimpleRAGError(f"Failed to add documents to vector store: {str(e)}")
+
+    def similarity_search(self, query: str, document_id: Optional[str] = None,
+                         top_k: int = 5) -> List[Tuple['Document', float]]:
+        """Perform similarity search with optional document filtering"""
+        if self.vector_store is None:
+            logger.warning("No documents in vector store")
+            return []
+
+        try:
+            logger.info(f"Performing similarity search for query: {query[:50]}...")
+
+            if document_id:
+                # For document-specific search, we need to search more and then filter
+                # since LangChain FAISS doesn't have built-in metadata filtering
+                search_k = min(100, top_k * 10)  # Search more to account for filtering
+                results_with_scores = self.vector_store.similarity_search_with_score(
+                    query, k=search_k
+                )
+
+                # Filter by document_id
+                filtered_results = []
+                for doc, score in results_with_scores:
+                    if doc.metadata.get("document_id") == document_id:
+                        filtered_results.append((doc, score))
+                        if len(filtered_results) >= top_k:
+                            break
+
+                results = filtered_results[:top_k]
+                logger.info(f"Found {len(results)} documents matching document_id '{document_id}'")
+
+            else:
+                # Global search across all documents
+                results_with_scores = self.vector_store.similarity_search_with_score(
+                    query, k=top_k
+                )
+                results = [(doc, score) for doc, score in results_with_scores]
+                logger.info(f"Found {len(results)} relevant documents globally")
+
+            return results
+
+        except Exception as e:
+            logger.error(f"Error during similarity search: {str(e)}")
+            raise QueryError(f"Failed to perform similarity search: {str(e)}")
+
+    def get_stats(self) -> Dict[str, Any]:
+        """Get vector store statistics"""
+        if self.vector_store is None:
+            return {
+                "total_documents": 0,
+                "embedding_model": self.embedding_model
+            }
+
+        return {
+            "total_documents": len(self.vector_store.docstore._dict),
+            "embedding_model": self.embedding_model
+        }
+
+    def clear(self) -> None:
+        """Clear the vector store"""
+        self.vector_store = None
+        logger.info("Vector store cleared")
+
+    def save_local(self, folder_path: str) -> None:
+        """Save the vector store to local disk"""
+        if self.vector_store is not None:
+            self.vector_store.save_local(folder_path)
+            logger.info(f"Vector store saved to {folder_path}")
+
+    def load_local(self, folder_path: str) -> None:
+        """Load the vector store from local disk"""
+        try:
+            self.vector_store = FAISS.load_local(
+                folder_path,
+                self.embeddings,
+                allow_dangerous_deserialization=True
+            )
+            logger.info(f"Vector store loaded from {folder_path}")
+        except Exception as e:
+            logger.error(f"Error loading vector store from {folder_path}: {str(e)}")
+            raise SimpleRAGError(f"Failed to load vector store: {str(e)}")
+
+
 if __name__ == "__main__":
     # Basic test to verify imports and initialization
     try:
@@ -330,6 +474,19 @@ if __name__ == "__main__":
             print("LocalEmbeddings working correctly!")
         else:
             print("sentence-transformers not available, skipping embeddings test")
+            
+        # Test VectorStore initialization if available
+        if LANGCHAIN_AVAILABLE:
+            print("Testing VectorStore initialization...")
+            try:
+                vector_store = VectorStore()
+                stats = vector_store.get_stats()
+                print(f"VectorStore stats: {stats}")
+                print("VectorStore working correctly!")
+            except Exception as vs_error:
+                print(f"VectorStore test failed (expected if dependencies missing): {vs_error}")
+        else:
+            print("langchain not available, skipping vector store test")
             
     except Exception as e:
         print(f"Error testing utilities: {e}")
