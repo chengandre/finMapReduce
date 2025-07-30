@@ -256,6 +256,62 @@ class DuplicateDocumentError(DocumentProcessingError):
         super().__init__(message)
 
 
+# Local embeddings imports and setup
+try:
+    from sentence_transformers import SentenceTransformer
+    SENTENCE_TRANSFORMERS_AVAILABLE = True
+except ImportError:
+    SENTENCE_TRANSFORMERS_AVAILABLE = False
+    print("Warning: sentence-transformers not available, falling back to OpenAI embeddings")
+    try:
+        from langchain_openai import OpenAIEmbeddings
+    except ImportError:
+        print("Warning: langchain_openai not available either")
+
+
+class LocalEmbeddings:
+    """Custom local embeddings using sentence-transformers with model caching"""
+
+    # Class-level cache for models to avoid repeated downloads
+    _model_cache = {}
+
+    def __init__(self, model_name: str = "all-MiniLM-L6-v2"):
+        if not SENTENCE_TRANSFORMERS_AVAILABLE:
+            raise ImportError("sentence-transformers is required for local embeddings")
+
+        self.model_name = model_name
+
+        # Check if model is already cached
+        if model_name not in self._model_cache:
+            logger.info(f"Loading local embedding model: {model_name}")
+            self._model_cache[model_name] = SentenceTransformer(model_name)
+            logger.info(f"Cached local embedding model: {model_name}")
+        else:
+            logger.info(f"Using cached local embedding model: {model_name}")
+
+        self.model = self._model_cache[model_name]
+
+    def embed_documents(self, texts: List[str]) -> List[List[float]]:
+        """Embed a list of documents"""
+        embeddings = self.model.encode(texts, convert_to_tensor=False)
+        return embeddings.tolist()
+
+    def embed_query(self, text: str) -> List[float]:
+        """Embed a single query"""
+        embedding = self.model.encode([text], convert_to_tensor=False)
+        return embedding[0].tolist()
+
+    def __call__(self, text: str) -> List[float]:
+        """Make the class callable for LangChain compatibility"""
+        return self.embed_query(text)
+
+    @classmethod
+    def clear_cache(cls):
+        """Clear the model cache (useful for testing or memory management)"""
+        cls._model_cache.clear()
+        logger.info("Cleared embedding model cache")
+
+
 if __name__ == "__main__":
     # Basic test to verify imports and initialization
     try:
@@ -264,5 +320,16 @@ if __name__ == "__main__":
         ValidationUtils.validate_document_id("test_doc_123")
         ValidationUtils.validate_query("What is the revenue?")
         print("Validation utilities working correctly!")
+        
+        # Test embeddings if available
+        if SENTENCE_TRANSFORMERS_AVAILABLE:
+            print("Testing LocalEmbeddings...")
+            embeddings = LocalEmbeddings()
+            test_embedding = embeddings.embed_query("test query")
+            print(f"Embedding dimension: {len(test_embedding)}")
+            print("LocalEmbeddings working correctly!")
+        else:
+            print("sentence-transformers not available, skipping embeddings test")
+            
     except Exception as e:
-        print(f"Error testing foundation utilities: {e}")
+        print(f"Error testing utilities: {e}")
