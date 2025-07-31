@@ -171,7 +171,8 @@ def process_batch(batch_id, samples_batch, prompt_template):
         model_name="deepseek/deepseek-r1-0528:free",
         temperature=0.01,
         max_tokens=8000,
-        provider="openrouter"
+        provider="openrouter",
+        key=None
     )
 
     try:

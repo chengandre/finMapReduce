@@ -25,10 +25,12 @@ def main():
                       help='Provider of the LLM')
     parser.add_argument('--max_concurrent_qa', type=int, default=20,
                       help='Maximum number of QA pairs to process concurrently')
+    parser.add_argument('--key', type=str, default=None,
+                      help='API key selector: "self" uses SELF_OPENAI_API_KEY, otherwise uses OPENAI_API_KEY')
     args = parser.parse_args()
 
     print(f"Loading model: {args.model_name}")
-    llm = RateLimitedGPT(model_name=args.model_name, temperature=args.temperature, max_tokens=args.max_tokens, provider=args.provider)
+    llm = RateLimitedGPT(model_name=args.model_name, temperature=args.temperature, max_tokens=args.max_tokens, provider=args.provider, key=args.key)
 
     print(f"Processing {args.num_samples if args.num_samples else 'all'} samples from {args.jsonl_path}")
     results = process_financebench_qa(
@@ -42,16 +44,49 @@ def main():
     )
 
     # Print summary results
-    print("\n===== Evaluation Summary =====")
+    print("\n" + "="*60)
+    print("MAPREDUCE EVALUATION RESULTS")
+    print("="*60)
+    
     eval_summary = results["evaluation_summary"]
+    token_summary = results["token_usage_summary"]
+    
+    # Basic results
     print(f"Total samples: {eval_summary['total']}")
-    print(f"Correct answers: {eval_summary['correct']}")
-    print(f"Incorrect answers: {eval_summary['incorrect']}")
-    print(f"Coherent answers: {eval_summary['coherent']}")
-    print(f"Deviated answers: {eval_summary['deviated']}")
-    print(f"No answers: {eval_summary['no_answer']}")
-    print(f"Accuracy: {eval_summary['accuracy']:.2%}")
+    print(f"Overall accuracy: {eval_summary['accuracy']:.2%}")
     print(f"Time taken: {results['time_taken']:.2f} seconds")
+    
+    # Token usage summary
+    print(f"\nTOKEN USAGE SUMMARY:")
+    print(f"  Total input tokens: {token_summary['total_input_tokens']:,}")
+    print(f"  Total output tokens: {token_summary['total_output_tokens']:,}")  
+    print(f"  Total tokens: {token_summary['total_tokens']:,}")
+    print(f"  Avg input per question: {token_summary['avg_input_tokens_per_question']:.0f}")
+    print(f"  Avg output per question: {token_summary['avg_output_tokens_per_question']:.0f}")
+    print(f"  Token efficiency ratio: {token_summary['token_efficiency_ratio']:.3f}")
+    
+    # Judgment distribution
+    print(f"\nJUDGMENT DISTRIBUTION:")
+    judgments = eval_summary['judgment_distribution']
+    percentages = eval_summary['judgment_percentages']
+    print(f"  Correct: {judgments['correct']} ({percentages['correct']:.1%})")
+    print(f"  Coherent: {judgments['coherent']} ({percentages['coherent']:.1%})")
+    print(f"  Deviated: {judgments['deviated']} ({percentages['deviated']:.1%})")
+    print(f"  Incorrect: {judgments['incorrect']} ({percentages['incorrect']:.1%})")
+    print(f"  No answer: {judgments['no_answer']} ({percentages['no_answer']:.1%})")
+    
+    # Accuracy by question type
+    print(f"\nACCURACY BY QUESTION TYPE:")
+    accuracy_by_type = eval_summary['accuracy_by_question_type']
+    for q_type, stats in accuracy_by_type.items():
+        print(f"  {q_type}: {stats['accuracy']:.1%} ({stats['correct']}/{stats['total']})")
+    
+    # MapReduce-specific metrics
+    print(f"\nMAPREDUCE CONFIG:")
+    mapreduce_config = results["mapreduce_config"]
+    print(f"  Chunk size: {mapreduce_config['chunk_size']}")
+    print(f"  Chunk overlap: {mapreduce_config['chunk_overlap']}")
+    print(f"  Max concurrent QA: {mapreduce_config['max_concurrent_qa']}")
 
     # Print detailed results for each QA pair if verbose flag is set
     if args.verbose:

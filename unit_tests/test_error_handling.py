@@ -319,7 +319,8 @@ class TestSimpleRAGErrorHandling:
     @pytest.fixture
     def simple_rag(self, mock_dependencies):
         """Create SimpleRAG instance with mocked dependencies"""
-        return SimpleRAG()
+        mock_llm = Mock()
+        return SimpleRAG(llm=mock_llm)
     
     def test_ingest_document_invalid_inputs(self, simple_rag):
         """Test document ingestion with invalid inputs"""
@@ -550,7 +551,9 @@ class TestErrorHandlingIntegration:
         """Test complete validation flow from input to processing"""
         try:
             # This should work with real components if available
-            rag = SimpleRAG()
+            from utils import GPT
+            mock_llm = GPT(model_name="gpt-4o-mini", temperature=0.1, max_tokens=1500, provider="openrouter", key=None)
+            rag = SimpleRAG(llm=mock_llm)
             
             # Test various validation scenarios
             with pytest.raises(ValidationError):
@@ -566,7 +569,9 @@ class TestErrorHandlingIntegration:
     def test_error_message_clarity(self):
         """Test that error messages are clear and actionable"""
         try:
-            rag = SimpleRAG()
+            from utils import GPT
+            mock_llm = GPT(model_name="gpt-4o-mini", temperature=0.1, max_tokens=1500, provider="openrouter", key=None)
+            rag = SimpleRAG(llm=mock_llm)
             
             # Test that error messages provide helpful information
             try:

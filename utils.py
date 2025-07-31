@@ -23,7 +23,7 @@ load_dotenv()
 logging.getLogger("langchain_text_splitters.base").setLevel(logging.ERROR)
 
 class GPT:
-    def __init__(self, model_name, temperature, max_tokens, provider="openrouter"):
+    def __init__(self, model_name, temperature, max_tokens, provider="openrouter", key=None):
         """
         Initialize an LLM wrapper for either OpenAI or OpenRouter
 
@@ -32,18 +32,23 @@ class GPT:
             temperature (float): Temperature setting for generation
             max_tokens (int): Maximum tokens for completion
             provider (str): Either "openai" or "openrouter"
+            key (str): Key selector - if "self" and provider is not "openrouter", uses SELF_OPENAI_API_KEY, else OPENAI_API_KEY
         """
         self.model_name = model_name
         self.temperature = temperature
         self.max_tokens = max_tokens
         self.provider = provider.lower()
+        self.key = key
 
         # Configure based on provider
         if provider == "openrouter":
             api_key = SecretStr(os.getenv("OPENROUTER_API_KEY", ""))
             base_url = "https://openrouter.ai/api/v1"
         else:  # default to openai
-            api_key = SecretStr(os.getenv("SELF_OPENAI_API_KEY", ""))
+            if key == "self":
+                api_key = SecretStr(os.getenv("SELF_OPENAI_API_KEY", ""))
+            else:
+                api_key = SecretStr(os.getenv("OPENAI_API_KEY", ""))
             base_url = None
 
         self.llm = ChatOpenAI(
@@ -350,3 +355,75 @@ def load_pdf_chunk(pdf_file, chunk_size, chunk_overlap, method):
 
     documents = loader.load()
     return _process_documents(documents, chunk_size, chunk_overlap, use_tiktoken=True)
+
+
+# ===== EVALUATION STATISTICS FUNCTIONS =====
+
+def calculate_token_usage_summary(qa_data):
+    """
+    Calculate aggregated token usage statistics across all QA pairs.
+    
+    Args:
+        qa_data (list): List of QA pair dictionaries with token_stats
+        
+    Returns:
+        dict: Aggregated token statistics including totals, averages, and efficiency ratio
+    """
+    if not qa_data:
+        return {
+            "total_input_tokens": 0,
+            "total_output_tokens": 0,
+            "total_tokens": 0,
+            "avg_input_tokens_per_question": 0,
+            "avg_output_tokens_per_question": 0,
+            "token_efficiency_ratio": 0
+        }
+    
+    total_input = sum(qa.get("token_stats", {}).get("total", {}).get("input_tokens", 0) for qa in qa_data)
+    total_output = sum(qa.get("token_stats", {}).get("total", {}).get("output_tokens", 0) for qa in qa_data)
+    
+    return {
+        "total_input_tokens": total_input,
+        "total_output_tokens": total_output, 
+        "total_tokens": total_input + total_output,
+        "avg_input_tokens_per_question": total_input / len(qa_data),
+        "avg_output_tokens_per_question": total_output / len(qa_data),
+        "token_efficiency_ratio": total_output / total_input if total_input > 0 else 0
+    }
+
+
+def calculate_accuracy_by_question_type(qa_data):
+    """
+    Calculate accuracy metrics broken down by question_type.
+    
+    Args:
+        qa_data (list): List of QA pair dictionaries with question_type and judgment fields
+        
+    Returns:
+        dict: Nested dictionary with accuracy stats per question type
+    """
+    question_type_stats = {}
+    
+    for qa in qa_data:
+        q_type = qa.get("question_type", "unknown")
+        judgment = qa.get("judgment", "unknown").lower()
+        
+        if q_type not in question_type_stats:
+            question_type_stats[q_type] = {
+                "correct": 0, "coherent": 0, "deviated": 0, 
+                "incorrect": 0, "no_answer": 0, "total": 0
+            }
+        
+        if judgment in question_type_stats[q_type]:
+            question_type_stats[q_type][judgment] += 1
+        question_type_stats[q_type]["total"] += 1
+    
+    # Calculate accuracy for each question type
+    for q_type in question_type_stats:
+        stats = question_type_stats[q_type]
+        if stats["total"] > 0:
+            stats["accuracy"] = stats["correct"] / stats["total"]
+        else:
+            stats["accuracy"] = 0
+    
+    return question_type_stats

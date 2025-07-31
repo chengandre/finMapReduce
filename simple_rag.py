@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 # Set up logging
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(level=logging.ERROR)
 logger = logging.getLogger(__name__)
 
 
@@ -215,7 +215,7 @@ class ValidationUtils:
 @dataclass
 class QueryResponse:
     """Response structure for RAG queries"""
-    answer: str
+    json_response: Dict[str, Any]
     source_chunks: List['Document']
     document_ids: List[str]
     confidence_scores: List[float]
@@ -621,19 +621,14 @@ class DocumentProcessor:
 class QueryProcessor:
     """Handles answer generation using existing GPT wrapper with structured prompts"""
 
-    def __init__(self, llm_model: str = "gpt-4o-mini", temperature: float = 0.1):
+    def __init__(self, llm):
         if not UTILS_AVAILABLE:
             raise ImportError("utils module is required for query processing")
             
-        self.llm = GPT(
-            model_name=llm_model,
-            temperature=temperature,
-            max_tokens=1500,
-            provider="openrouter"
-        )
-        logger.info(f"QueryProcessor initialized with model: {llm_model}")
+        self.llm = llm
+        logger.info(f"QueryProcessor initialized with provided LLM: {getattr(llm, 'model_name', 'unknown')}")
 
-    def generate_answer(self, question: str, context_chunks: List['Document']) -> str:
+    def generate_answer(self, question: str, context_chunks: List['Document']) -> Dict[str, Any]:
         """
         Generate answer from retrieved context chunks using structured prompt
 
@@ -642,10 +637,16 @@ class QueryProcessor:
             context_chunks: List of relevant document chunks
 
         Returns:
-            Generated answer with source attribution
+            Structured JSON response from the LLM
         """
         if not context_chunks:
-            return "I couldn't find any relevant information to answer your question."
+            return {
+                "answer": "I couldn't find any relevant information to answer your question.",
+                "reasoning": "No relevant context chunks were provided.",
+                "evidence": [],
+                "confidence": "low",
+                "sources": []
+            }
 
         try:
             # Format context from chunks
@@ -657,24 +658,25 @@ class QueryProcessor:
             # Generate answer using the GPT wrapper
             response = self.llm(prompt_template, context=context, question=question)
 
-            # Extract and process the structured response
-            answer = self._process_response(response, context_chunks)
+            # Extract JSON response (GPT wrapper handles validation and retries)
+            if isinstance(response, dict) and 'json' in response:
+                json_response = response['json']
+            else:
+                # Fallback if response format is unexpected
+                raise ValueError("Expected JSON response from GPT wrapper")
 
-            logger.info(f"Generated answer for question: {question}...")
-            return answer
+            logger.info(f"Generated structured answer for question: {question[:50]}...")
+            return json_response
 
         except Exception as e:
             logger.error(f"Error generating answer: {str(e)}")
-            return f"I encountered an error while generating the answer: {str(e)}"
-
-    def _create_answer_prompt(self):
-        """
-        Load the structured prompt template from YAML file
-
-        Returns:
-            PromptTemplate for answer generation
-        """
-        return load_prompt("prompts/rag_prompt.yml")
+            return {
+                "answer": f"I encountered an error while generating the answer: {str(e)}",
+                "reasoning": "Error occurred during answer generation",
+                "evidence": [],
+                "confidence": "low", 
+                "sources": []
+            }
 
     def _format_context(self, chunks: List['Document']) -> str:
         """
@@ -710,128 +712,25 @@ Content:
 
         return "\n".join(context_parts)
 
-    def _process_response(self, response: Dict[str, Any], context_chunks: List['Document']) -> str:
-        """
-        Process the structured JSON response from the LLM
-
-        Args:
-            response: Response from GPT wrapper
-            context_chunks: Original context chunks for fallback
-
-        Returns:
-            Formatted answer with source attribution
-        """
-        try:
-            # Extract JSON response
-            if isinstance(response, dict) and 'json' in response:
-                json_response = response['json']
-            elif isinstance(response, dict) and 'raw_response' in response:
-                # Fallback to raw response if JSON parsing failed
-                return self._fallback_response(response['raw_response'].content, context_chunks)
-            else:
-                return self._fallback_response(str(response), context_chunks)
-
-            # Extract components from structured response
-            reasoning = json_response.get("reasoning", "")
-            evidence = json_response.get("evidence", [])
-            answer = json_response.get("answer", "")
-            confidence = json_response.get("confidence", "medium")
-            sources = json_response.get("sources", [])
-
-            # Format the final response
-            formatted_answer = self._format_final_answer(
-                answer, reasoning, evidence, confidence, sources
-            )
-
-            return formatted_answer
-
-        except Exception as e:
-            logger.warning(f"Error processing structured response: {str(e)}")
-            # Fallback to simple response processing
-            raw_content = response.get('raw_response', {}).content if isinstance(response, dict) else str(response)
-            return self._fallback_response(raw_content, context_chunks)
-
-    def _format_final_answer(self, answer: str, reasoning: str, evidence: List[str],
-                           confidence: str, sources: List[str]) -> str:
-        """
-        Format the final answer with all components
-
-        Args:
-            answer: Main answer text
-            reasoning: Reasoning process
-            evidence: Supporting evidence
-            confidence: Confidence level
-            sources: Source document IDs
-
-        Returns:
-            Formatted final answer
-        """
-        formatted_parts = []
-
-        # Main answer
-        if answer:
-            formatted_parts.append(answer)
-
-        # Add confidence indicator
-        if confidence:
-            formatted_parts.append(f"\n**Confidence:** {confidence.title()}")
-
-        # Add sources if available
-        if sources:
-            sources_text = ", ".join(sources)
-            formatted_parts.append(f"**Sources:** {sources_text}")
-
-        # Add evidence if available and not too verbose (limit to first 3 items)
-        if evidence:
-            limited_evidence = evidence[:3]  # Take only first 3 pieces of evidence
-            evidence_text = "\n".join([f"- {ev[:200]}..." if len(ev) > 200 else f"- {ev}" for ev in limited_evidence])
-            formatted_parts.append(f"**Supporting Evidence:**\n{evidence_text}")
-
-        return "\n\n".join(formatted_parts)
-
-    def _fallback_response(self, raw_content: str, context_chunks: List['Document']) -> str:
-        """
-        Fallback response processing when structured parsing fails
-
-        Args:
-            raw_content: Raw response content
-            context_chunks: Original context chunks
-
-        Returns:
-            Formatted response with basic source attribution
-        """
-        # Extract unique document IDs for source attribution
-        document_ids = set()
-        for chunk in context_chunks:
-            doc_id = chunk.metadata.get("document_id")
-            if doc_id:
-                document_ids.add(doc_id)
-
-        # Add basic source attribution
-        if document_ids:
-            sources_text = ", ".join(sorted(document_ids))
-            return f"{raw_content}\n\n**Sources:** {sources_text}"
-
-        return raw_content
 
 
 class SimpleRAG:
     """Main orchestrator class for the RAG system"""
 
     def __init__(self,
+                 llm,
                  embedding_model: str = "all-MiniLM-L6-v2",
                  chunk_size: int = 1000,
                  chunk_overlap: int = 200,
-                 llm_model: str = "gpt-4o-mini",
                  use_local_embeddings: bool = True):
         """
         Initialize the SimpleRAG system
 
         Args:
+            llm: LLM instance for answer generation
             embedding_model: Embedding model to use (local or OpenAI)
             chunk_size: Size of document chunks
             chunk_overlap: Overlap between chunks
-            llm_model: LLM model for answer generation
             use_local_embeddings: Whether to use local embeddings
         """
         if not LANGCHAIN_AVAILABLE:
@@ -841,7 +740,7 @@ class SimpleRAG:
             
         self.document_processor = DocumentProcessor(chunk_size, chunk_overlap)
         self.vector_store = VectorStore(embedding_model, use_local_embeddings)
-        self.query_processor = QueryProcessor(llm_model)
+        self.query_processor = QueryProcessor(llm)
         self.document_ids = set()
 
         logger.info("SimpleRAG system initialized successfully")
@@ -1011,7 +910,13 @@ class SimpleRAG:
                 query_time = time.time() - start_time
                 no_results_message = self._generate_no_results_message(document_id)
                 return QueryResponse(
-                    answer=no_results_message,
+                    json_response={
+                        "answer": no_results_message,
+                        "reasoning": "No relevant documents found in similarity search",
+                        "evidence": [],
+                        "confidence": "low",
+                        "sources": []
+                    },
                     source_chunks=[],
                     document_ids=[],
                     confidence_scores=[],
@@ -1042,7 +947,13 @@ class SimpleRAG:
             if not source_chunks:
                 query_time = time.time() - start_time
                 return QueryResponse(
-                    answer="I found some results but they contained no valid content to answer your question.",
+                    json_response={
+                        "answer": "I found some results but they contained no valid content to answer your question.",
+                        "reasoning": "Search results contained only empty or invalid content",
+                        "evidence": [],
+                        "confidence": "low",
+                        "sources": []
+                    },
                     source_chunks=[],
                     document_ids=[],
                     confidence_scores=[],
@@ -1058,21 +969,24 @@ class SimpleRAG:
 
             # Generate answer using QueryProcessor
             try:
-                answer = self.query_processor.generate_answer(clean_question, source_chunks)
+                json_response = self.query_processor.generate_answer(clean_question, source_chunks)
             except Exception as e:
                 logger.error(f"Answer generation failed: {str(e)}")
-                # Provide fallback response
-                answer = (
-                    f"I found relevant information but encountered an error generating the answer: {str(e)}. "
-                    f"Found {len(source_chunks)} relevant chunks from documents: {', '.join(result_document_ids)}"
-                )
+                # Provide fallback JSON response
+                json_response = {
+                    "answer": f"I found relevant information but encountered an error generating the answer: {str(e)}. Found {len(source_chunks)} relevant chunks from documents: {', '.join(result_document_ids)}",
+                    "reasoning": "Error occurred during answer generation",
+                    "evidence": [],
+                    "confidence": "low",
+                    "sources": result_document_ids
+                }
 
             query_time = time.time() - start_time
 
             logger.info(f"Query completed in {query_time:.2f}s, found {len(source_chunks)} relevant chunks")
 
             return QueryResponse(
-                answer=answer,
+                json_response=json_response,
                 source_chunks=source_chunks,
                 document_ids=result_document_ids,
                 confidence_scores=confidence_scores,
@@ -1257,7 +1171,8 @@ if __name__ == "__main__":
         if UTILS_AVAILABLE and LANGCHAIN_AVAILABLE:
             print("Testing QueryProcessor initialization...")
             try:
-                query_processor = QueryProcessor()
+                test_llm = GPT(model_name="gpt-4o-mini", temperature=0.1, max_tokens=1500, provider="openrouter", key=None)
+                query_processor = QueryProcessor(test_llm)
                 print("QueryProcessor working correctly!")
             except Exception as qp_error:
                 print(f"QueryProcessor test failed: {qp_error}")
@@ -1268,7 +1183,9 @@ if __name__ == "__main__":
         if UTILS_AVAILABLE and LANGCHAIN_AVAILABLE:
             print("Testing complete SimpleRAG system...")
             try:
-                rag = SimpleRAG()
+                # Create a test LLM instance
+                test_llm = GPT(model_name="gpt-4o-mini", temperature=0.1, max_tokens=1500, provider="openrouter", key=None)
+                rag = SimpleRAG(llm=test_llm)
                 status = rag.get_status()
                 print(f"SimpleRAG system status: {status}")
                 print("SimpleRAG system initialized successfully!")

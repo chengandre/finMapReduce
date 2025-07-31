@@ -7,7 +7,7 @@ framework as the MapReduce pipeline for fair comparison.
 
 from simple_rag import SimpleRAG
 from mapreduce_qa import load_financebench_data, evaluate_with_llm_judge
-from utils import RateLimitedGPT
+from utils import RateLimitedGPT, calculate_token_usage_summary, calculate_accuracy_by_question_type
 from datetime import datetime
 from tqdm import tqdm
 
@@ -72,19 +72,18 @@ def process_single_rag_qa(qa_pair, rag_system, llm, top_k=5):
             top_k=top_k
         )
 
-        # Parse the structured answer to extract components
-        answer_parts = response.answer.split("\n\n")
-        clean_answer = answer_parts[0] if answer_parts else response.answer
+        # Extract structured components from JSON response
+        json_response = response.json_response
+        clean_answer = json_response.get("answer", "No answer provided")
+        clean_reasoning = json_response.get("reasoning", "RAG-based retrieval and generation")
+        clean_evidence = json_response.get("evidence", [])
         
-        # Extract reasoning and evidence from the full response
-        clean_reasoning = "RAG-based retrieval and generation"
-        clean_evidence = []
-        
-        # Try to extract evidence from source chunks
-        for chunk in response.source_chunks[:3]:  # Limit to first 3 chunks
-            if hasattr(chunk, 'page_content') and chunk.page_content:
-                evidence_snippet = chunk.page_content[:200] + "..." if len(chunk.page_content) > 200 else chunk.page_content
-                clean_evidence.append(evidence_snippet)
+        # If no evidence in JSON response, fall back to extracting from source chunks
+        if not clean_evidence:
+            for chunk in response.source_chunks:  # Limit to first 3 chunks
+                if hasattr(chunk, 'page_content') and chunk.page_content:
+                    evidence_snippet = chunk.page_content[:200] + "..." if len(chunk.page_content) > 200 else chunk.page_content
+                    clean_evidence.append(evidence_snippet)
 
         # Store the RAG answer and reasoning in qa_pair dictionary
         qa_pair["llm_answer"] = clean_answer
@@ -114,9 +113,27 @@ def process_single_rag_qa(qa_pair, rag_system, llm, top_k=5):
         # Store additional RAG-specific metadata
         qa_pair["rag_metadata"] = {
             "chunks_retrieved": len(response.source_chunks),
-            "confidence_scores": response.confidence_scores,
             "query_time": response.query_time,
-            "document_ids_used": response.document_ids
+            "document_ids_used": response.document_ids,
+            
+            # Enhanced: Per-chunk details showing document filtering worked
+            # "chunk_details": [
+            #     {
+            #         "chunk_index": i,
+            #         "document_id": chunk.metadata.get("document_id"),
+            #         "similarity_score": response.confidence_scores[i] if i < len(response.confidence_scores) else None,
+            #         "chunk_size": len(chunk.page_content),
+            #         "source_name": chunk.metadata.get("source_name", "unknown")
+            #     }
+            #     for i, chunk in enumerate(response.source_chunks)
+            # ],
+            
+            # Enhanced: Confirmation that document filtering was applied
+            "document_filtering_applied": document_id is not None,
+            "target_document_id": document_id,
+            
+            # Keep original confidence_scores for backward compatibility
+            "confidence_scores": response.confidence_scores
         }
 
     except Exception as e:
@@ -191,10 +208,10 @@ def process_financebench_rag(jsonl_path, model_name, llm, num_samples=None,
     disable_tqdm()
     
     rag_system = SimpleRAG(
+        llm=llm,
         embedding_model=embedding_model,
         chunk_size=chunk_size,
         chunk_overlap=chunk_overlap,
-        llm_model=model_name,
         use_local_embeddings=True
     )
 
@@ -241,6 +258,10 @@ def process_financebench_rag(jsonl_path, model_name, llm, num_samples=None,
     os.makedirs(results_dir, exist_ok=True)
     results_file = os.path.join(results_dir, f"rag_results_{timestamp}.json")
 
+    # Calculate enhanced statistics
+    token_summary = calculate_token_usage_summary(qa_data)
+    accuracy_by_type = calculate_accuracy_by_question_type(qa_data)
+    
     results = {
         "approach": "RAG",
         "model_name": model_name,
@@ -248,6 +269,10 @@ def process_financebench_rag(jsonl_path, model_name, llm, num_samples=None,
         "time_taken": time.time() - t1,
         "num_samples": len(qa_data),
         "qa_data": qa_data,
+        
+        # Enhanced: Token usage summary
+        "token_usage_summary": token_summary,
+        
         "rag_config": {
             "embedding_model": embedding_model,
             "chunk_size": chunk_size,
@@ -256,7 +281,34 @@ def process_financebench_rag(jsonl_path, model_name, llm, num_samples=None,
             "max_concurrent_qa": max_concurrent_qa
         },
         "rag_system_status": rag_status,
-        "evaluation_summary": evaluation_results
+        
+        # Enhanced: Detailed evaluation summary
+        "evaluation_summary": {
+            "judgment_distribution": {
+                "correct": evaluation_results["correct"],
+                "coherent": evaluation_results["coherent"],
+                "deviated": evaluation_results["deviated"], 
+                "incorrect": evaluation_results["incorrect"],
+                "no_answer": evaluation_results["no_answer"]
+            },
+            "total": evaluation_results["total"],
+            "accuracy": evaluation_results["accuracy"],
+            
+            # Enhanced: Accuracy by question type
+            "accuracy_by_question_type": accuracy_by_type,
+            
+            # Enhanced: Judgment percentages
+            "judgment_percentages": {
+                "correct": evaluation_results["correct"] / evaluation_results["total"] if evaluation_results["total"] > 0 else 0,
+                "coherent": evaluation_results["coherent"] / evaluation_results["total"] if evaluation_results["total"] > 0 else 0,
+                "deviated": evaluation_results["deviated"] / evaluation_results["total"] if evaluation_results["total"] > 0 else 0,
+                "incorrect": evaluation_results["incorrect"] / evaluation_results["total"] if evaluation_results["total"] > 0 else 0,
+                "no_answer": evaluation_results["no_answer"] / evaluation_results["total"] if evaluation_results["total"] > 0 else 0
+            },
+            
+            # Keep original detailed_judgments for backward compatibility
+            "detailed_judgments": evaluation_results.get("detailed_judgments", [])
+        }
     }
 
     with open(results_file, 'w', encoding='utf-8') as f:
@@ -271,7 +323,7 @@ def main():
     parser = argparse.ArgumentParser(description="Run RAG evaluation on FinanceBench data with LLM evaluation")
     parser.add_argument('--jsonl_path', type=str, default="../financebench/data/financebench_open_source.jsonl",
                       help='Path to the financebench jsonl file')
-    parser.add_argument('--model_name', type=str, default="deepseek/deepseek-r1-0528:free",
+    parser.add_argument('--model_name', type=str, default="gpt-4o-mini",
                       help='Name of the OpenAI model to use')
     parser.add_argument('--num_samples', type=int, default=None,
                       help='Number of samples to process from the dataset')
@@ -295,14 +347,18 @@ def main():
                       help='Maximum number of QA pairs to process concurrently')
     parser.add_argument('--quiet', action='store_true',
                       help='Reduce progress bar output')
+    parser.add_argument('--key', type=str, default=None,
+                      help='API key selector: "self" uses SELF_OPENAI_API_KEY, otherwise uses OPENAI_API_KEY')
     args = parser.parse_args()
 
     print(f"Loading model: {args.model_name}")
+    print(f"Provider: {args.provider}")
     llm = RateLimitedGPT(
         model_name=args.model_name, 
         temperature=args.temperature, 
         max_tokens=args.max_tokens, 
-        provider=args.provider
+        provider=args.provider,
+        key=args.key
     )
 
     print(f"Processing {args.num_samples if args.num_samples else 'all'} samples from {args.jsonl_path}")
@@ -319,22 +375,50 @@ def main():
     )
 
     # Print summary results
-    print("\n===== RAG Evaluation Summary =====")
     eval_summary = results["evaluation_summary"]
+    token_summary = results["token_usage_summary"]
+    
+    print("\n" + "="*60)
+    print("RAG EVALUATION RESULTS")
+    print("="*60)
+    
+    # Basic results
     print(f"Total samples: {eval_summary['total']}")
-    print(f"Correct answers: {eval_summary['correct']}")
-    print(f"Incorrect answers: {eval_summary['incorrect']}")
-    print(f"Coherent answers: {eval_summary['coherent']}")
-    print(f"Deviated answers: {eval_summary['deviated']}")
-    print(f"No answers: {eval_summary['no_answer']}")
-    print(f"Accuracy: {eval_summary['accuracy']:.2%}")
+    print(f"Overall accuracy: {eval_summary['accuracy']:.2%}")
     print(f"Time taken: {results['time_taken']:.2f} seconds")
     
-    # Print RAG-specific metrics
+    # Token usage summary
+    print(f"\nTOKEN USAGE SUMMARY:")
+    print(f"  Total input tokens: {token_summary['total_input_tokens']:,}")
+    print(f"  Total output tokens: {token_summary['total_output_tokens']:,}")  
+    print(f"  Total tokens: {token_summary['total_tokens']:,}")
+    print(f"  Avg input per question: {token_summary['avg_input_tokens_per_question']:.0f}")
+    print(f"  Avg output per question: {token_summary['avg_output_tokens_per_question']:.0f}")
+    print(f"  Token efficiency ratio: {token_summary['token_efficiency_ratio']:.3f}")
+    
+    # Judgment distribution
+    print(f"\nJUDGMENT DISTRIBUTION:")
+    judgments = eval_summary['judgment_distribution']
+    percentages = eval_summary['judgment_percentages']
+    print(f"  Correct: {judgments['correct']} ({percentages['correct']:.1%})")
+    print(f"  Coherent: {judgments['coherent']} ({percentages['coherent']:.1%})")
+    print(f"  Deviated: {judgments['deviated']} ({percentages['deviated']:.1%})")
+    print(f"  Incorrect: {judgments['incorrect']} ({percentages['incorrect']:.1%})")
+    print(f"  No answer: {judgments['no_answer']} ({percentages['no_answer']:.1%})")
+    
+    # Accuracy by question type
+    print(f"\nACCURACY BY QUESTION TYPE:")
+    accuracy_by_type = eval_summary['accuracy_by_question_type']
+    for q_type, stats in accuracy_by_type.items():
+        print(f"  {q_type}: {stats['accuracy']:.1%} ({stats['correct']}/{stats['total']})")
+    
+    # RAG-specific metrics
+    print(f"\nRAG SYSTEM STATUS:")
     rag_status = results["rag_system_status"]
-    print(f"Documents processed: {rag_status['total_documents']}")
-    print(f"Embedding model: {rag_status['embedding_model']}")
-    print(f"Chunk size: {rag_status['chunk_size']}, Overlap: {rag_status['chunk_overlap']}")
+    print(f"  Documents processed: {rag_status['total_documents']}")
+    print(f"  Total chunks in vector store: {rag_status['vector_store_documents']}")
+    print(f"  Embedding model: {rag_status['embedding_model']}")
+    print(f"  Chunk size: {rag_status['chunk_size']}, Overlap: {rag_status['chunk_overlap']}")
 
     # Print detailed results for each QA pair if verbose flag is set
     if args.verbose:

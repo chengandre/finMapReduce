@@ -1,5 +1,5 @@
 from langchain.prompts import load_prompt
-from utils import load_pdf_chunk
+from utils import load_pdf_chunk, calculate_token_usage_summary, calculate_accuracy_by_question_type
 from datetime import datetime
 from tqdm import tqdm
 
@@ -566,15 +566,54 @@ def process_financebench_qa(jsonl_path, model_name, llm, num_samples=None, chunk
     os.makedirs(results_dir, exist_ok=True)
     results_file = os.path.join(results_dir, f"results_{timestamp}.json")
 
+    # Calculate enhanced statistics
+    token_summary = calculate_token_usage_summary(qa_data)
+    accuracy_by_type = calculate_accuracy_by_question_type(qa_data)
+    
     results = {
+        "approach": "MapReduce",
         "model_name": model_name,
         "execution_time": datetime.now().isoformat(),
         "time_taken": time.time() - t1,
         "num_samples": len(qa_data),
         "qa_data": qa_data,
-        "chunk_size": chunk_size,
-        "chunk_overlap": chunk_overlap,
-        "evaluation_summary": evaluation_results
+        
+        # Enhanced: Token usage summary
+        "token_usage_summary": token_summary,
+        
+        "mapreduce_config": {
+            "chunk_size": chunk_size,
+            "chunk_overlap": chunk_overlap,
+            "max_concurrent_qa": max_concurrent_qa
+        },
+        
+        # Enhanced: Detailed evaluation summary
+        "evaluation_summary": {
+            "judgment_distribution": {
+                "correct": evaluation_results["correct"],
+                "coherent": evaluation_results["coherent"],
+                "deviated": evaluation_results["deviated"], 
+                "incorrect": evaluation_results["incorrect"],
+                "no_answer": evaluation_results["no_answer"]
+            },
+            "total": evaluation_results["total"],
+            "accuracy": evaluation_results["accuracy"],
+            
+            # Enhanced: Accuracy by question type
+            "accuracy_by_question_type": accuracy_by_type,
+            
+            # Enhanced: Judgment percentages
+            "judgment_percentages": {
+                "correct": evaluation_results["correct"] / evaluation_results["total"] if evaluation_results["total"] > 0 else 0,
+                "coherent": evaluation_results["coherent"] / evaluation_results["total"] if evaluation_results["total"] > 0 else 0,
+                "deviated": evaluation_results["deviated"] / evaluation_results["total"] if evaluation_results["total"] > 0 else 0,
+                "incorrect": evaluation_results["incorrect"] / evaluation_results["total"] if evaluation_results["total"] > 0 else 0,
+                "no_answer": evaluation_results["no_answer"] / evaluation_results["total"] if evaluation_results["total"] > 0 else 0
+            },
+            
+            # Keep original detailed_judgments for backward compatibility
+            "detailed_judgments": evaluation_results.get("detailed_judgments", [])
+        }
     }
 
     with open(results_file, 'w', encoding='utf-8') as f:

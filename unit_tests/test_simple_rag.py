@@ -55,15 +55,17 @@ class TestSimpleRAG:
     @pytest.fixture
     def simple_rag(self, mock_dependencies):
         """Create SimpleRAG instance with mocked dependencies"""
-        return SimpleRAG()
+        mock_llm = Mock()
+        return SimpleRAG(llm=mock_llm)
     
     def test_initialization(self, mock_dependencies):
         """Test SimpleRAG initialization"""
+        mock_llm = Mock()
         rag = SimpleRAG(
+            llm=mock_llm,
             embedding_model="custom-model",
             chunk_size=500,
             chunk_overlap=100,
-            llm_model="gpt-4",
             use_local_embeddings=False
         )
         
@@ -379,7 +381,10 @@ class TestSimpleRAGIntegration:
     def test_initialization_with_real_components(self):
         """Test that SimpleRAG can be initialized with real components"""
         try:
+            from utils import GPT
+            mock_llm = GPT(model_name="gpt-4o-mini", temperature=0.1, max_tokens=1500, provider="openrouter", key=None)
             rag = SimpleRAG(
+                llm=mock_llm,
                 embedding_model="all-MiniLM-L6-v2",
                 use_local_embeddings=True
             )
@@ -403,7 +408,9 @@ class TestSimpleRAGIntegration:
     def test_error_handling_with_real_components(self):
         """Test error handling with real components"""
         try:
-            rag = SimpleRAG()
+            from utils import GPT
+            mock_llm = GPT(model_name="gpt-4o-mini", temperature=0.1, max_tokens=1500, provider="openrouter", key=None)
+            rag = SimpleRAG(llm=mock_llm)
             
             # Test query without documents
             with pytest.raises(QueryError):

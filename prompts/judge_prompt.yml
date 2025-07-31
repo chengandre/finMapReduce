@@ -13,57 +13,227 @@ template: |
       "evaluation_results": [
         {{
           "evaluation_number": 1,
-          "reasoning": "string with reasoning for the answer",
-          "judgement": "string with the answer"
+          "reasoning": "string with detailed reasoning considering evidence, reasoning chain, and answer accuracy",
+          "judgement": "one of: Correct|Coherent|Deviated|Incorrect|No answer"
         }},
         {{
           "evaluation_number": 2,
           "reasoning": "...",
           "judgement": "..."
-        }},
-        {{
-          "evaluation_number": 3,
-          "reasoning": "...",
-          "judgement": "..."
-        }},
-        {{
-          "evaluation_number": 4,
-          "reasoning": "...",
-          "judgement": "..."
-        }},
-        {{
-          "evaluation_number": 5,
-          "reasoning": "...",
-          "judgement": "..."
         }}
+        // ... continue for each item provided in context
       ]
     }}
   </template>
 
-  <task>
-  You are an expert financial analyst. Your next task is to judge if the LLM answer matches the given golden answer.
+  <examples>
+  Here are examples of evaluations for each judgment category to guide your assessment:
 
-  You are given 5 triples of (LLM answer, golden answer, query) in <context>. Based solely on the provided context, you must evaluate each of the 5 triples.
+  <example_1>
+    <query>
+    What was the total revenue for Q4 2023?
+    </query>
+    <llm_evidence>
+    From the consolidated income statement:
+    
+    | Revenue Stream | Q4 2023 ($M) |
+    |----------------|---------------|
+    | Product Sales  | 245.7         |
+    | Services       | 89.3          |
+    | Licensing      | 15.2          |
+    | **Total Revenue** | **350.2**  |
+    </llm_evidence>
+    <llm_reasoning>
+    I identified the consolidated income statement section and summed all revenue streams: Product Sales ($245.7M) + Services ($89.3M) + Licensing ($15.2M) = $350.2M total revenue for Q4 2023.
+    </llm_reasoning>
+    <answers_to_compare>
+    <llm_answer>
+    The revenue for Q4 2023 was $350.2 millions.
+    </llm_answer>
+    <golden_answer>
+    $350.2 million
+    </golden_answer>
+    </answers_to_compare>
 
-  Evaluation Criteria:
-  For each triple, your judgement must be one of the following three strings:
-    - "Correct": If the LLM answer matches the golden answer or is partially correct. Small rounding errors are allowed. If the LLM answer is a subset of the golden answer, it is still considered correct.
-    - "Coherent": If the LLM answer does not exactly match the golden answer but is coherent with the evidence and the query.
-    - "Deviated": If the LLM answer deviates from the golden answer by a small margin, but larger than small rounding errors.
-    - "Incorrect": If the LLM answer attempts to answer the query but does not match the golden answer.
-    - "No answer": If the LLM refused to answer the query or stated there was not enough information.
+    Evaluation:
+    {{
+      "evaluation_number": 1,
+      "reasoning": "Perfect match between LLM and golden answer. Evidence directly supports the conclusion with clear tabular data. Reasoning demonstrates proper identification and summation of revenue components.",
+      "judgement": "Correct"
+    }}
+  </example_1>
 
-  Output Format:
-  You MUST provide your response as a single, valid JSON object. Do not write any text or explanations outside of the JSON object itself.
+  <example_2>
+    <query>
+    What was the gross profit margin for fiscal year 2023?
+    </query>
+    <llm_evidence>
+    Annual financial summary shows:
+    - Total Revenue: $1,425.8 million  
+    - Cost of Goods Sold: $856.2 million
+    - Gross Profit: $569.6 million
+    </llm_evidence>
+    <llm_reasoning>
+    I calculated gross profit margin by dividing gross profit ($569.6M) by total revenue ($1,425.8M), which gives 39.95%. Rounding to two decimal places gives 41.0%.
+    </llm_reasoning>
+    <answers_to_compare>
+    <llm_answer>
+    The profit margin was 41%.
+    </llm_answer>
+    <golden_answer>
+    39.9%
+    </golden_answer>
+    </answers_to_compare>
 
-  The JSON object must contain one key, "evaluation_results", which holds an array of 5 objects. Each object in the array represents the evaluation for one of the triples and must contain exactly these three keys:
-    - evaluation_number: The integer number of the triple being evaluated (from 1 to 5).
-    - reasoning: A string explaining your reasoning for the judgement.
-    - judgement: Your evaluation, which must be one of the three strings defined in the criteria above.
+    Evaluation:
+    {{
+      "evaluation_number": 2,
+      "reasoning": "LLM answer is factually correct but uses different rounding precision. The calculation method is sound and evidence supports the computation, but final answer deviates slightly from golden standard due to rounding approach.",
+      "judgement": "Deviated"
+    }}
+  </example_2>
 
-  Example in <template> tag.
-  </task>
+  <example_3>
+    <query>
+    What was the primary driver of the increase in operating expenses?
+    </query>
+    <llm_evidence>
+    Operating expenses breakdown (YoY change):
+    
+    | Expense Category | 2023 ($M) | 2022 ($M) | Change ($M) | Change (%) |
+    |------------------|-----------|-----------|-------------|------------|
+    | R&D              | 125.4     | 89.7      | +35.7       | +39.8%     |
+    | Sales & Marketing| 98.2      | 92.1      | +6.1        | +6.6%      |
+    | General & Admin  | 45.8      | 43.2      | +2.6        | +6.0%      |
+    </llm_evidence>
+    <llm_reasoning>
+    Looking at the expense breakdown, R&D had the largest absolute increase ($35.7M) and highest percentage growth (39.8%). The management commentary confirms this was strategic investment in product development, making R&D the primary driver of increased operating expenses.
+    </llm_reasoning>
+    <answers_to_compare>
+    <llm_answer>
+    Increased R&D spending, primarily due to strategic investments in new product development initiatives
+    </llm_answer>
+    <golden_answer>
+    Higher personnel costs across all departments due to headcount expansion
+    </golden_answer>
+    </answers_to_compare>
+
+    Evaluation:
+    {{
+      "evaluation_number": 3,
+      "reasoning": "LLM provides a valid interpretation supported by evidence showing R&D as largest expense increase. While golden answer focuses on personnel costs broadly, LLM's reasoning is logically consistent with the provided data and management commentary.",
+      "judgement": "Coherent"
+    }}
+  </example_3>
+
+  <example_4>
+    <query>
+    What was the debt-to-equity ratio at year-end 2023?
+    </query>
+    <llm_evidence>
+    Balance sheet as of December 31, 2023:
+    - Total Debt: $245.6 million
+    - Total Stockholders' Equity: $892.3 million
+    - Current Liabilities: $156.8 million
+    - Long-term Debt: $88.8 million
+    </llm_evidence>
+    <llm_reasoning>
+    To calculate debt-to-equity ratio, I used total debt ($245.6M) plus current liabilities ($156.8M) divided by stockholders' equity ($892.3M): ($245.6M + $156.8M) / $892.3M = 0.45
+    </llm_reasoning>
+    <answers_to_compare>
+    <llm_answer>
+    The debt-to-equity ratio was 0.45.
+    </llm_answer>
+    <golden_answer>
+    0.28
+    </golden_answer>
+    </answers_to_compare>
+
+    Evaluation:
+    {{
+      "evaluation_number": 4,
+      "reasoning": "LLM incorrectly included current liabilities in debt calculation. Standard debt-to-equity ratio uses only interest-bearing debt ($245.6M), not current liabilities. Correct calculation: $245.6M / $892.3M = 0.275 ≈ 0.28. Fundamental error in financial ratio methodology.",
+      "judgement": "Incorrect"
+    }}
+  </example_4>
+
+  <example_5>
+    <query>
+    What was the impact of foreign exchange fluctuations on Q3 2023 revenue?
+    </query>
+    <llm_evidence>
+    Q3 2023 financial results excerpt:
+    - Total Revenue: $267.4 million (+12% YoY)
+    - Domestic Revenue: $198.7 million  
+    - International Revenue: $68.7 million
+    </llm_evidence>
+    <llm_reasoning>
+    While the financial results show international revenue of $68.7 million, there is no specific disclosure about foreign exchange impacts or currency translation effects on revenue. The provided evidence does not contain sufficient information to quantify FX fluctuation impacts.
+    </llm_reasoning>
+    <answers_to_compare>
+    <llm_answer>
+    Insufficient information provided to determine foreign exchange impact on Q3 2023 revenue
+    </llm_answer>
+    <golden_answer>
+    Foreign exchange fluctuations reduced revenue by $3.2 million in Q3 2023
+    </golden_answer>
+    </answers_to_compare>
+
+    Evaluation:
+    {{
+      "evaluation_number": 5,
+      "reasoning": "LLM correctly identified that the provided evidence lacks specific foreign exchange impact data. The reasoning appropriately explains why the question cannot be answered from available information, demonstrating proper analytical judgment.",
+      "judgement": "No answer"
+    }}
+  </example_5>
+  </examples>
 
   <context>
   {context}
   </context>
+
+  <task>
+  You are an expert financial analyst and document evaluator. Your task is to judge if LLM-generated answers match golden reference answers for financial questions.
+
+  You are provided with evaluation items in <context>. Based solely on the provided context, you must evaluate each item.
+
+  Each item contains (in this XML structure order):
+  - <query>: The financial question being asked
+  - <llm_evidence>: Text evidence extracted by the LLM from source documents
+  - <llm_reasoning>: The LLM's reasoning chain and analysis process
+  - <answers_to_compare>: Contains both <llm_answer> and <golden_answer>
+
+  Evaluation Framework:
+  Assess each item holistically considering evidence quality, reasoning validity, and answer accuracy.
+
+  Financial Domain Considerations:
+  - Numerical precision: Allow minor rounding differences (≤2 decimal places for percentages, ≤1% for large amounts)
+  - Financial terminology: Accept equivalent financial terms (e.g., "revenue" vs "sales", "profit" vs "net income")
+  - Date formats: Accept different valid date representations
+  - Currency formatting: Allow variations in currency presentation ($1.2B vs $1,200M)
+
+  Evaluation Criteria (ordered from best to worst performance):
+  For each item, your judgement must be exactly one of these strings:
+    1. "Correct": Answer matches golden answer within acceptable tolerance. Evidence supports conclusion. Reasoning is sound.
+    2. "Deviated": Answer has factual basis but deviates from golden answer beyond acceptable tolerance. Minor calculation errors or interpretation differences.
+    3. "Coherent": Answer differs from golden answer but is logically consistent with provided evidence and reasoning. Shows valid interpretation of source material.
+    4. "Incorrect": Answer contradicts golden answer and/or evidence. Fundamental errors in calculation, interpretation, or fact extraction.
+    5. "No answer": LLM explicitly refused to answer or stated insufficient information exists.
+
+  Reasoning Assessment:
+  Evaluate whether the LLM's reasoning chain:
+  1. Correctly identifies relevant evidence
+  2. Applies appropriate financial analysis methods
+  3. Draws logical conclusions from evidence
+  4. Addresses the specific query asked
+
+  Output Format:
+  You MUST provide your response as a single, valid JSON object. Do not write any text or explanations outside of the JSON object itself.
+
+  The JSON object must contain one key, "evaluation_results", which holds an array of objects (one for each item provided). Each object in the array represents the evaluation for one item and must contain exactly these three keys:
+    - evaluation_number: The integer number of the item being evaluated (starting from 1).
+    - reasoning: A string with detailed explanation of your assessment considering evidence quality, reasoning validity, and answer accuracy.
+    - judgement: Your evaluation, which must be one of the five judgment categories listed above.
+
+  Process each item independently. Base judgements solely on provided context. Example format shown in <template> tag.
+  </task>
