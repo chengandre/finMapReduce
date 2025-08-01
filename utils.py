@@ -372,10 +372,10 @@ def load_markdown_chunk(markdown_file, chunk_size, chunk_overlap):
     try:
         with open(markdown_file, 'r', encoding='utf-8') as f:
             content = f.read()
-        
+
         documents = [Document(page_content=content, metadata={"source": markdown_file})]
         return _process_documents(documents, chunk_size, chunk_overlap, use_tiktoken=True)
-    
+
     except FileNotFoundError:
         print(f"Warning: File not found: {markdown_file}")
         return [], 0
@@ -389,10 +389,10 @@ def load_markdown_chunk(markdown_file, chunk_size, chunk_overlap):
 def calculate_token_usage_summary(qa_data):
     """
     Calculate aggregated token usage statistics across all QA pairs.
-    
+
     Args:
         qa_data (list): List of QA pair dictionaries with token_stats
-        
+
     Returns:
         dict: Aggregated token statistics including totals, averages, and efficiency ratio
     """
@@ -405,13 +405,13 @@ def calculate_token_usage_summary(qa_data):
             "avg_output_tokens_per_question": 0,
             "token_efficiency_ratio": 0
         }
-    
+
     total_input = sum(qa.get("token_stats", {}).get("total", {}).get("input_tokens", 0) for qa in qa_data)
     total_output = sum(qa.get("token_stats", {}).get("total", {}).get("output_tokens", 0) for qa in qa_data)
-    
+
     return {
         "total_input_tokens": total_input,
-        "total_output_tokens": total_output, 
+        "total_output_tokens": total_output,
         "total_tokens": total_input + total_output,
         "avg_input_tokens_per_question": total_input / len(qa_data),
         "avg_output_tokens_per_question": total_output / len(qa_data),
@@ -422,29 +422,29 @@ def calculate_token_usage_summary(qa_data):
 def calculate_accuracy_by_question_type(qa_data):
     """
     Calculate accuracy metrics broken down by question_type.
-    
+
     Args:
         qa_data (list): List of QA pair dictionaries with question_type and judgment fields
-        
+
     Returns:
         dict: Nested dictionary with accuracy stats per question type
     """
     question_type_stats = {}
-    
+
     for qa in qa_data:
         q_type = qa.get("question_type", "unknown")
         judgment = qa.get("judgment", "unknown").lower()
-        
+
         if q_type not in question_type_stats:
             question_type_stats[q_type] = {
-                "correct": 0, "coherent": 0, "deviated": 0, 
+                "correct": 0, "coherent": 0, "deviated": 0,
                 "incorrect": 0, "no_answer": 0, "total": 0
             }
-        
+
         if judgment in question_type_stats[q_type]:
             question_type_stats[q_type][judgment] += 1
         question_type_stats[q_type]["total"] += 1
-    
+
     # Calculate accuracy for each question type
     for q_type in question_type_stats:
         stats = question_type_stats[q_type]
@@ -452,5 +452,5 @@ def calculate_accuracy_by_question_type(qa_data):
             stats["accuracy"] = stats["correct"] / stats["total"]
         else:
             stats["accuracy"] = 0
-    
+
     return question_type_stats

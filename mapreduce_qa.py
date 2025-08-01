@@ -22,7 +22,7 @@ def preprocess_results(results):
     return modified_results
 
 
-def mapreduce_qa_documents(llm, chunked_docs, final_query, map_query):
+def mapreduce_qa_documents(llm, chunked_docs, final_query, map_query, use_old_prompts=False):
     """
     The function helps in querying pdf for questions
 
@@ -44,7 +44,8 @@ def mapreduce_qa_documents(llm, chunked_docs, final_query, map_query):
     t1 = time.time()
 
     # Load prompts from YAML
-    map_prompt = load_prompt("prompts/map_prompt.yml")
+    map_prompt_file = "prompts/map_prompt_old.yml" if use_old_prompts else "prompts/map_prompt.yml"
+    map_prompt = load_prompt(map_prompt_file)
     total_docs = len(chunked_docs)
 
     # Track map phase token usage
@@ -71,7 +72,8 @@ def mapreduce_qa_documents(llm, chunked_docs, final_query, map_query):
     # modified_results = preprocess_results(results=results)
 
     # Load reduce prompt
-    reduce_prompt = load_prompt("prompts/reduce_prompt.yml")
+    reduce_prompt_file = "prompts/reduce_prompt_old.yml" if use_old_prompts else "prompts/reduce_prompt.yml"
+    reduce_prompt = load_prompt(reduce_prompt_file)
 
     # Extract content from results for reduce phase - handle JSON format with XML structure
     processed_results = []
@@ -209,7 +211,7 @@ def load_finqa_data(json_path, num_samples=None):
 
     qa_data = []
     count = 0
-    
+
     for item in data:
         if num_samples is not None and count >= num_samples:
             break
@@ -331,7 +333,7 @@ def evaluate_with_llm_judge(llm, qa_data, batch_size=5):
                 "error": str(e)
             }
 
-    print(f"Judge evaluation: Processing {len(batches)} batches with multithreading...")
+    # print(f"Judge evaluation: Processing {len(batches)} batches with multithreading...")
 
     # Process batches in parallel
     all_judgments = []
@@ -410,7 +412,7 @@ def evaluate_with_llm_judge(llm, qa_data, batch_size=5):
     return results
 
 
-def process_single_qa(qa_pair, llm, chunk_size=36000, chunk_overlap=1000):
+def process_single_qa(qa_pair, llm, chunk_size=36000, chunk_overlap=1000, use_old_prompts=False):
     """
     Process a single QA pair from financebench.
 
@@ -419,6 +421,7 @@ def process_single_qa(qa_pair, llm, chunk_size=36000, chunk_overlap=1000):
         llm: LLM instance to use
         chunk_size (int): Size of each document chunk
         chunk_overlap (int): Overlap between document chunks
+        use_old_prompts (bool): Whether to use old prompt versions
 
     Returns:
         dict: Updated QA pair with LLM answer and token stats
@@ -431,7 +434,8 @@ def process_single_qa(qa_pair, llm, chunk_size=36000, chunk_overlap=1000):
     docs, token_count = load_pdf_chunk(doc_name, chunk_size, chunk_overlap, method="marker")
 
     # Load prompts from YAML
-    map_prompt = load_prompt("prompts/map_prompt.yml")
+    map_prompt_file = "prompts/map_prompt_old.yml" if use_old_prompts else "prompts/map_prompt.yml"
+    map_prompt = load_prompt(map_prompt_file)
 
     # Track map phase token usage
     map_input_tokens = 0
@@ -449,7 +453,7 @@ def process_single_qa(qa_pair, llm, chunk_size=36000, chunk_overlap=1000):
     if len(doc_basename) > 20:
         doc_basename = doc_basename[:17] + "..."
 
-    with concurrent.futures.ThreadPoolExecutor(min(chunks_count, 10)) as executor:
+    with concurrent.futures.ThreadPoolExecutor(min(chunks_count, 20)) as executor:
         # Submit all chunk processing tasks
         futures = {
             executor.submit(process_chunk, chunk): i
@@ -474,7 +478,8 @@ def process_single_qa(qa_pair, llm, chunk_size=36000, chunk_overlap=1000):
             map_output_tokens += raw_response.usage_metadata["output_tokens"]
 
     # Load reduce prompt
-    reduce_prompt = load_prompt("prompts/reduce_prompt.yml")
+    reduce_prompt_file = "prompts/reduce_prompt_old.yml" if use_old_prompts else "prompts/reduce_prompt.yml"
+    reduce_prompt = load_prompt(reduce_prompt_file)
 
     # Process map results for reduce phase - handle JSON format with XML structure
     processed_results = []
@@ -558,7 +563,7 @@ def process_single_qa(qa_pair, llm, chunk_size=36000, chunk_overlap=1000):
     return qa_pair
 
 
-def process_single_finqa(qa_pair, llm, doc_dir, chunk_size=36000, chunk_overlap=1000):
+def process_single_finqa(qa_pair, llm, doc_dir, chunk_size=36000, chunk_overlap=1000, use_old_prompts=False):
     """
     Process a single QA pair from FinQA.
 
@@ -568,6 +573,7 @@ def process_single_finqa(qa_pair, llm, doc_dir, chunk_size=36000, chunk_overlap=
         doc_dir (str): Directory containing FinQA markdown documents
         chunk_size (int): Size of each document chunk
         chunk_overlap (int): Overlap between document chunks
+        use_old_prompts (bool): Whether to use old prompt versions
 
     Returns:
         dict: Updated QA pair with LLM answer and token stats
@@ -575,13 +581,13 @@ def process_single_finqa(qa_pair, llm, doc_dir, chunk_size=36000, chunk_overlap=
     # Get document name and question from the qa_pair
     doc_name = qa_pair["doc_name"]
     question = qa_pair["question"]
-    
+
     # Construct full path to markdown file
     markdown_file = os.path.join(doc_dir, doc_name)
 
     # Load document chunks
     docs, token_count = load_markdown_chunk(markdown_file, chunk_size, chunk_overlap)
-    
+
     if not docs:
         # Handle case where document couldn't be loaded
         print(f"Error loading document: {markdown_file}")
@@ -596,7 +602,8 @@ def process_single_finqa(qa_pair, llm, doc_dir, chunk_size=36000, chunk_overlap=
         return qa_pair
 
     # Load prompts from YAML
-    map_prompt = load_prompt("prompts/map_prompt.yml")
+    map_prompt_file = "prompts/map_prompt_old.yml" if use_old_prompts else "prompts/map_prompt.yml"
+    map_prompt = load_prompt(map_prompt_file)
 
     # Track map phase token usage
     map_input_tokens = 0
@@ -639,7 +646,8 @@ def process_single_finqa(qa_pair, llm, doc_dir, chunk_size=36000, chunk_overlap=
             map_output_tokens += raw_response.usage_metadata["output_tokens"]
 
     # Load reduce prompt
-    reduce_prompt = load_prompt("prompts/reduce_prompt.yml")
+    reduce_prompt_file = "prompts/reduce_prompt_old.yml" if use_old_prompts else "prompts/reduce_prompt.yml"
+    reduce_prompt = load_prompt(reduce_prompt_file)
 
     # Process map results for reduce phase - handle JSON format with XML structure
     processed_results = []
@@ -720,7 +728,7 @@ def process_single_finqa(qa_pair, llm, doc_dir, chunk_size=36000, chunk_overlap=
     return qa_pair
 
 
-def process_financebench_qa(jsonl_path, model_name, llm, num_samples=None, chunk_size=36000, chunk_overlap=1000, max_concurrent_qa=3):
+def process_financebench_qa(jsonl_path, model_name, llm, num_samples=None, chunk_size=36000, chunk_overlap=1000, max_concurrent_qa=3, use_old_prompts=False):
     """
     Process QA from financebench with parallel processing of QA pairs.
 
@@ -732,11 +740,12 @@ def process_financebench_qa(jsonl_path, model_name, llm, num_samples=None, chunk
         chunk_size (int): Size of each document chunk
         chunk_overlap (int): Overlap between document chunks
         max_concurrent_qa (int): Maximum number of QA pairs to process concurrently
+        use_old_prompts (bool): Whether to use old prompt versions
 
     Returns:
         dict: Results containing model answers, golden answers, and evaluation results
     """
-    print(f"Loading {num_samples if num_samples else 'all'} samples from financebench data...")
+    # print(f"Loading {num_samples if num_samples else 'all'} samples from financebench data...")
     qa_data = load_financebench_data(jsonl_path, num_samples)
 
     # # Print all document names before processing
@@ -747,13 +756,13 @@ def process_financebench_qa(jsonl_path, model_name, llm, num_samples=None, chunk
     # print("===============================\n")
 
     t1 = time.time()
-    print(f"Processing {len(qa_data)} QA pairs with {max_concurrent_qa} concurrent workers...")
+    # print(f"Processing {len(qa_data)} QA pairs with {max_concurrent_qa} concurrent workers...")
 
     # Process QA pairs in parallel
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_concurrent_qa) as executor:
         # Submit all QA processing tasks
         future_to_qa = {
-            executor.submit(process_single_qa, qa_pair, llm, chunk_size, chunk_overlap): i
+            executor.submit(process_single_qa, qa_pair, llm, chunk_size, chunk_overlap, use_old_prompts): i
             for i, qa_pair in enumerate(qa_data)
         }
 
@@ -776,19 +785,20 @@ def process_financebench_qa(jsonl_path, model_name, llm, num_samples=None, chunk
     print(f"QA processing completed in {process_time:.1f} seconds ({process_time/len(qa_data):.1f}s per question)")
 
     # Evaluate using LLM judge
-    print("Evaluating answers using LLM judge...")
+    # print("Evaluating answers using LLM judge...")
     evaluation_results = evaluate_with_llm_judge(llm, qa_data)
 
     # Save results to file
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     results_dir = "financebench_results"
     os.makedirs(results_dir, exist_ok=True)
-    results_file = os.path.join(results_dir, f"results_{timestamp}.json")
+    file_prefix = "results_old" if use_old_prompts else "results"
+    results_file = os.path.join(results_dir, f"{file_prefix}_{timestamp}.json")
 
     # Calculate enhanced statistics
     token_summary = calculate_token_usage_summary(qa_data)
     accuracy_by_type = calculate_accuracy_by_question_type(qa_data)
-    
+
     results = {
         "approach": "MapReduce",
         "model_name": model_name,
@@ -796,31 +806,31 @@ def process_financebench_qa(jsonl_path, model_name, llm, num_samples=None, chunk
         "time_taken": time.time() - t1,
         "num_samples": len(qa_data),
         "qa_data": qa_data,
-        
+
         # Enhanced: Token usage summary
         "token_usage_summary": token_summary,
-        
+
         "mapreduce_config": {
             "chunk_size": chunk_size,
             "chunk_overlap": chunk_overlap,
             "max_concurrent_qa": max_concurrent_qa
         },
-        
+
         # Enhanced: Detailed evaluation summary
         "evaluation_summary": {
             "judgment_distribution": {
                 "correct": evaluation_results["correct"],
                 "coherent": evaluation_results["coherent"],
-                "deviated": evaluation_results["deviated"], 
+                "deviated": evaluation_results["deviated"],
                 "incorrect": evaluation_results["incorrect"],
                 "no_answer": evaluation_results["no_answer"]
             },
             "total": evaluation_results["total"],
             "accuracy": evaluation_results["accuracy"],
-            
+
             # Enhanced: Accuracy by question type
             "accuracy_by_question_type": accuracy_by_type,
-            
+
             # Enhanced: Judgment percentages
             "judgment_percentages": {
                 "correct": evaluation_results["correct"] / evaluation_results["total"] if evaluation_results["total"] > 0 else 0,
@@ -829,7 +839,7 @@ def process_financebench_qa(jsonl_path, model_name, llm, num_samples=None, chunk
                 "incorrect": evaluation_results["incorrect"] / evaluation_results["total"] if evaluation_results["total"] > 0 else 0,
                 "no_answer": evaluation_results["no_answer"] / evaluation_results["total"] if evaluation_results["total"] > 0 else 0
             },
-            
+
             # Keep original detailed_judgments for backward compatibility
             "detailed_judgments": evaluation_results.get("detailed_judgments", [])
         }
@@ -838,12 +848,12 @@ def process_financebench_qa(jsonl_path, model_name, llm, num_samples=None, chunk
     with open(results_file, 'w', encoding='utf-8') as f:
         json.dump(results, f, indent=2)
     print(f"Results saved to {results_file}")
-    print(f"Accuracy: {evaluation_results['accuracy']:.2f}")
+    # print(f"Accuracy: {evaluation_results['accuracy']:.2f}")
 
     return results
 
 
-def process_finqa_qa(json_path, doc_dir, model_name, llm, num_samples=None, chunk_size=36000, chunk_overlap=1000, max_concurrent_qa=20):
+def process_finqa_qa(json_path, doc_dir, model_name, llm, num_samples=None, chunk_size=36000, chunk_overlap=1000, max_concurrent_qa=20, use_old_prompts=False):
     """
     Process QA from FinQA with parallel processing of QA pairs.
 
@@ -856,21 +866,22 @@ def process_finqa_qa(json_path, doc_dir, model_name, llm, num_samples=None, chun
         chunk_size (int): Size of each document chunk
         chunk_overlap (int): Overlap between document chunks
         max_concurrent_qa (int): Maximum number of QA pairs to process concurrently
+        use_old_prompts (bool): Whether to use old prompt versions
 
     Returns:
         dict: Results containing model answers, golden answers, and evaluation results
     """
-    print(f"Loading {num_samples if num_samples else 'all'} samples from FinQA data...")
+    # print(f"Loading {num_samples if num_samples else 'all'} samples from FinQA data...")
     qa_data = load_finqa_data(json_path, num_samples)
 
     t1 = time.time()
-    print(f"Processing {len(qa_data)} QA pairs with {max_concurrent_qa} concurrent workers...")
+    # print(f"Processing {len(qa_data)} QA pairs with {max_concurrent_qa} concurrent workers...")
 
     # Process QA pairs in parallel
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_concurrent_qa) as executor:
         # Submit all QA processing tasks
         future_to_qa = {
-            executor.submit(process_single_finqa, qa_pair, llm, doc_dir, chunk_size, chunk_overlap): i
+            executor.submit(process_single_finqa, qa_pair, llm, doc_dir, chunk_size, chunk_overlap, use_old_prompts): i
             for i, qa_pair in enumerate(qa_data)
         }
 
@@ -893,18 +904,19 @@ def process_finqa_qa(json_path, doc_dir, model_name, llm, num_samples=None, chun
     print(f"QA processing completed in {process_time:.1f} seconds ({process_time/len(qa_data):.1f}s per question)")
 
     # Evaluate using LLM judge
-    print("Evaluating answers using LLM judge...")
+    # print("Evaluating answers using LLM judge...")
     evaluation_results = evaluate_with_llm_judge(llm, qa_data)
 
     # Save results to file
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     results_dir = "finqa_results"
     os.makedirs(results_dir, exist_ok=True)
-    results_file = os.path.join(results_dir, f"finqa_results_{timestamp}.json")
+    file_prefix = "finqa_results_old" if use_old_prompts else "finqa_results"
+    results_file = os.path.join(results_dir, f"{file_prefix}_{timestamp}.json")
 
     # Calculate enhanced statistics
     token_summary = calculate_token_usage_summary(qa_data)
-    
+
     results = {
         "approach": "MapReduce",
         "dataset": "FinQA",
@@ -913,28 +925,28 @@ def process_finqa_qa(json_path, doc_dir, model_name, llm, num_samples=None, chun
         "time_taken": time.time() - t1,
         "num_samples": len(qa_data),
         "qa_data": qa_data,
-        
+
         # Enhanced: Token usage summary
         "token_usage_summary": token_summary,
-        
+
         "mapreduce_config": {
             "chunk_size": chunk_size,
             "chunk_overlap": chunk_overlap,
             "max_concurrent_qa": max_concurrent_qa
         },
-        
+
         # Enhanced: Detailed evaluation summary
         "evaluation_summary": {
             "judgment_distribution": {
                 "correct": evaluation_results["correct"],
                 "coherent": evaluation_results["coherent"],
-                "deviated": evaluation_results["deviated"], 
+                "deviated": evaluation_results["deviated"],
                 "incorrect": evaluation_results["incorrect"],
                 "no_answer": evaluation_results["no_answer"]
             },
             "total": evaluation_results["total"],
             "accuracy": evaluation_results["accuracy"],
-            
+
             # Enhanced: Judgment percentages
             "judgment_percentages": {
                 "correct": evaluation_results["correct"] / evaluation_results["total"] if evaluation_results["total"] > 0 else 0,
@@ -943,7 +955,7 @@ def process_finqa_qa(json_path, doc_dir, model_name, llm, num_samples=None, chun
                 "incorrect": evaluation_results["incorrect"] / evaluation_results["total"] if evaluation_results["total"] > 0 else 0,
                 "no_answer": evaluation_results["no_answer"] / evaluation_results["total"] if evaluation_results["total"] > 0 else 0
             },
-            
+
             # Keep original detailed_judgments for backward compatibility
             "detailed_judgments": evaluation_results.get("detailed_judgments", [])
         }
@@ -952,6 +964,8 @@ def process_finqa_qa(json_path, doc_dir, model_name, llm, num_samples=None, chun
     with open(results_file, 'w', encoding='utf-8') as f:
         json.dump(results, f, indent=2)
     print(f"Results saved to {results_file}")
-    print(f"Accuracy: {evaluation_results['accuracy']:.2f}")
+    # print(f"Accuracy: {evaluation_results['accuracy']:.2f}")
 
     return results
+
+

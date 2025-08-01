@@ -338,7 +338,7 @@ class VectorStore:
     def __init__(self, embedding_model: str = "all-MiniLM-L6-v2", use_local: bool = True):
         if not LANGCHAIN_AVAILABLE:
             raise ImportError("langchain is required for vector store functionality")
-            
+
         self.embedding_model = embedding_model
         self.use_local = use_local
 
@@ -471,7 +471,7 @@ class DocumentProcessor:
     def __init__(self, chunk_size: int = 1000, chunk_overlap: int = 200):
         if not UTILS_AVAILABLE:
             raise ImportError("utils module is required for document processing")
-            
+
         # Validate chunk parameters
         self.chunk_size, self.chunk_overlap = ValidationUtils.validate_chunk_parameters(
             chunk_size, chunk_overlap
@@ -624,7 +624,7 @@ class QueryProcessor:
     def __init__(self, llm):
         if not UTILS_AVAILABLE:
             raise ImportError("utils module is required for query processing")
-            
+
         self.llm = llm
         logger.info(f"QueryProcessor initialized with provided LLM: {getattr(llm, 'model_name', 'unknown')}")
 
@@ -674,7 +674,7 @@ class QueryProcessor:
                 "answer": f"I encountered an error while generating the answer: {str(e)}",
                 "reasoning": "Error occurred during answer generation",
                 "evidence": [],
-                "confidence": "low", 
+                "confidence": "low",
                 "sources": []
             }
 
@@ -737,7 +737,7 @@ class SimpleRAG:
             raise ImportError("langchain is required for SimpleRAG system")
         if not UTILS_AVAILABLE:
             raise ImportError("utils module is required for SimpleRAG system")
-            
+
         self.document_processor = DocumentProcessor(chunk_size, chunk_overlap)
         self.vector_store = VectorStore(embedding_model, use_local_embeddings)
         self.query_processor = QueryProcessor(llm)
@@ -1132,7 +1132,7 @@ if __name__ == "__main__":
         ValidationUtils.validate_document_id("test_doc_123")
         ValidationUtils.validate_query("What is the revenue?")
         print("Validation utilities working correctly!")
-        
+
         # Test embeddings if available
         if SENTENCE_TRANSFORMERS_AVAILABLE:
             print("Testing LocalEmbeddings...")
@@ -1142,7 +1142,7 @@ if __name__ == "__main__":
             print("LocalEmbeddings working correctly!")
         else:
             print("sentence-transformers not available, skipping embeddings test")
-            
+
         # Test VectorStore initialization if available
         if LANGCHAIN_AVAILABLE:
             print("Testing VectorStore initialization...")
@@ -1155,7 +1155,7 @@ if __name__ == "__main__":
                 print(f"VectorStore test failed (expected if dependencies missing): {vs_error}")
         else:
             print("langchain not available, skipping vector store test")
-            
+
         # Test DocumentProcessor initialization if available
         if UTILS_AVAILABLE:
             print("Testing DocumentProcessor initialization...")
@@ -1166,7 +1166,7 @@ if __name__ == "__main__":
                 print(f"DocumentProcessor test failed: {dp_error}")
         else:
             print("utils module not available, skipping document processor test")
-            
+
         # Test QueryProcessor initialization if available
         if UTILS_AVAILABLE and LANGCHAIN_AVAILABLE:
             print("Testing QueryProcessor initialization...")
@@ -1178,7 +1178,7 @@ if __name__ == "__main__":
                 print(f"QueryProcessor test failed: {qp_error}")
         else:
             print("Required dependencies not available, skipping query processor test")
-            
+
         # Test complete SimpleRAG system if available
         if UTILS_AVAILABLE and LANGCHAIN_AVAILABLE:
             print("Testing complete SimpleRAG system...")
@@ -1193,6 +1193,6 @@ if __name__ == "__main__":
                 print(f"SimpleRAG system test failed: {rag_error}")
         else:
             print("Required dependencies not available, skipping SimpleRAG system test")
-            
+
     except Exception as e:
         print(f"Error testing utilities: {e}")
