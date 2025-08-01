@@ -357,6 +357,33 @@ def load_pdf_chunk(pdf_file, chunk_size, chunk_overlap, method):
     return _process_documents(documents, chunk_size, chunk_overlap, use_tiktoken=True)
 
 
+def load_markdown_chunk(markdown_file, chunk_size, chunk_overlap):
+    """
+    Load and chunk a markdown file for FinQA processing
+
+    Args:
+        markdown_file (str): Path to the markdown file
+        chunk_size (int): Size of each chunk
+        chunk_overlap (int): Overlap between chunks
+
+    Returns:
+        tuple: (list of Document objects, token count)
+    """
+    try:
+        with open(markdown_file, 'r', encoding='utf-8') as f:
+            content = f.read()
+        
+        documents = [Document(page_content=content, metadata={"source": markdown_file})]
+        return _process_documents(documents, chunk_size, chunk_overlap, use_tiktoken=True)
+    
+    except FileNotFoundError:
+        print(f"Warning: File not found: {markdown_file}")
+        return [], 0
+    except Exception as e:
+        print(f"Error loading markdown file {markdown_file}: {e}")
+        return [], 0
+
+
 # ===== EVALUATION STATISTICS FUNCTIONS =====
 
 def calculate_token_usage_summary(qa_data):
