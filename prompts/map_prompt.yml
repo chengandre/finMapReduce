@@ -22,30 +22,137 @@ template: |
   }}
   </template>
 
+  <examples>
+  <example_1>
+    <final_query>
+    What was the total revenue for Q4 2023?
+    </final_query>
+    <chunk_context>
+    Our fourth quarter 2023 financial performance reflected strong execution across multiple business segments. Total revenue for the quarter reached $427.8 million, representing a 12.3% increase compared to Q4 2022 revenue of $380.9 million. This growth was primarily driven by our Software Solutions division, which contributed $245.1 million, and our Professional Services segment, which generated $142.7 million. Hardware sales, while declining year-over-year, still contributed $40.0 million to quarterly revenue.
+    
+    Operating expenses for the quarter increased to $312.4 million, up from $298.7 million in the prior year period, primarily due to increased headcount in our engineering teams and higher marketing investments for new product launches. We also completed the acquisition of DataTech Solutions in November 2023 for $85 million, which will enhance our analytics capabilities moving forward.
+    
+    Looking ahead to 2024, we expect continued growth in our cloud-based offerings, though we anticipate some headwinds from the challenging macroeconomic environment.
+    </chunk_context>
+
+    Expected Output:
+    {{
+      "summary": "Q4 2023 financial results showing total revenue of $427.8M (12.3% YoY growth), broken down by business segments, along with operating expense information and forward-looking commentary",
+      "terms": ["Q4 2023", "total revenue", "$427.8 million", "12.3% increase", "Q4 2022", "$380.9 million", "Software Solutions", "$245.1 million", "Professional Services", "$142.7 million", "Hardware sales", "$40.0 million", "operating expenses", "$312.4 million", "$298.7 million", "DataTech Solutions", "$85 million", "cloud-based offerings", "macroeconomic environment"],
+      "evidence": ["Total revenue for the quarter reached $427.8 million, representing a 12.3% increase compared to Q4 2022 revenue of $380.9 million.", "This growth was primarily driven by our Software Solutions division, which contributed $245.1 million, and our Professional Services segment, which generated $142.7 million.", "Hardware sales, while declining year-over-year, still contributed $40.0 million to quarterly revenue."],
+      "answer": "The total revenue for Q4 2023 was $427.8 million.",
+      "relevance_score": 10
+    }}
+  </example_1>
+
+  <example_2>
+    <final_query>
+    What were the main factors contributing to the increase in research and development expenses?
+    </final_query>
+    <chunk_context>
+    The company's innovation strategy continued to evolve throughout 2023, with significant investments in emerging technologies. Our research and development team expanded from 145 employees at the beginning of the year to 189 employees by December 31, 2023. Total compensation costs across all departments increased by 8.2% year-over-year, reflecting our commitment to attracting top talent in competitive markets.
+    
+    During the third quarter, we established a new artificial intelligence research lab in Austin, Texas, with an initial setup cost of $12.3 million for equipment and facilities. The lab is expected to focus on machine learning applications for financial services. Additionally, we entered into several strategic partnerships with universities, including a $4.7 million collaboration agreement with MIT for advanced algorithm development.
+    
+    Sales and marketing expenses rose to $89.4 million for the full year, up from $82.1 million in 2022, primarily due to increased digital advertising spend and participation in industry conferences. General and administrative costs remained relatively stable at $34.2 million.
+    </chunk_context>
+
+    Expected Output:
+    {{
+      "summary": "Discussion of company's innovation strategy and workforce expansion, including R&D team growth from 145 to 189 employees, establishment of AI lab in Austin, and various expense categories across departments",
+      "terms": ["innovation strategy", "2023", "research and development", "145 employees", "189 employees", "December 31, 2023", "compensation costs", "8.2%", "artificial intelligence research lab", "Austin, Texas", "$12.3 million", "machine learning", "financial services", "MIT", "$4.7 million", "algorithm development", "sales and marketing expenses", "$89.4 million", "$82.1 million", "2022", "digital advertising", "general and administrative costs", "$34.2 million"],
+      "evidence": ["Our research and development team expanded from 145 employees at the beginning of the year to 189 employees by December 31, 2023.", "During the third quarter, we established a new artificial intelligence research lab in Austin, Texas, with an initial setup cost of $12.3 million for equipment and facilities.", "Additionally, we entered into several strategic partnerships with universities, including a $4.7 million collaboration agreement with MIT for advanced algorithm development."],
+      "answer": "While specific R&D expense increases aren't detailed, contributing factors include R&D team expansion (44 additional employees), establishment of a new AI lab ($12.3M setup cost), and university partnerships ($4.7M MIT collaboration).",
+      "relevance_score": 6
+    }}
+  </example_2>
+
+  <example_3>
+    <final_query>
+    What was the company's debt-to-equity ratio at the end of fiscal year 2023?
+    </final_query>
+    <chunk_context>
+    Our liquidity position remains strong heading into 2024, with cash and cash equivalents of $156.7 million as of December 31, 2023, compared to $134.2 million at the prior year-end. This increase reflects positive operating cash flow generation of $67.8 million during 2023, partially offset by capital expenditures of $23.4 million and dividend payments of $18.9 million to shareholders.
+    
+    We maintain a revolving credit facility of $75 million with our banking syndicate, of which $25 million was outstanding at year-end. The facility carries a variable interest rate currently set at LIBOR plus 200 basis points. Our weighted average cost of debt decreased to 4.2% in 2023 from 4.8% in the previous year due to favorable refinancing activities.
+    
+    Revenue growth momentum continued with full-year 2023 revenue reaching $1.63 billion, up 15.2% from 2022. Our customer retention rate improved to 94.3%, and we added 127 new enterprise clients during the year.
+    </chunk_context>
+
+    Expected Output:
+    {{
+      "summary": "Company's liquidity and financial position overview including cash balances, credit facilities, debt costs, and revenue performance metrics for 2023",
+      "terms": ["liquidity position", "2024", "cash and cash equivalents", "$156.7 million", "December 31, 2023", "$134.2 million", "operating cash flow", "$67.8 million", "2023", "capital expenditures", "$23.4 million", "dividend payments", "$18.9 million", "revolving credit facility", "$75 million", "$25 million outstanding", "LIBOR plus 200 basis points", "weighted average cost of debt", "4.2%", "4.8%", "revenue", "$1.63 billion", "15.2%", "2022", "customer retention rate", "94.3%", "127 new enterprise clients"],
+      "evidence": ["We maintain a revolving credit facility of $75 million with our banking syndicate, of which $25 million was outstanding at year-end.", "Our weighted average cost of debt decreased to 4.2% in 2023 from 4.8% in the previous year due to favorable refinancing activities."],
+      "answer": "Cannot calculate debt-to-equity ratio as the chunk mentions some debt ($25M outstanding from credit facility) but lacks comprehensive debt information and provides no equity figures.",
+      "relevance_score": 2
+    }}
+  </example_3>
+
+  <example_4>
+    <final_query>
+    What were the quarterly revenue figures for each business segment in 2023?
+    </final_query>
+    <chunk_context>
+    The company's corporate headquarters relocation to Chicago was completed in March 2023, with all 450 employees successfully transitioned to the new facility. The building features state-of-the-art amenities including a fitness center, cafeteria, and collaborative workspaces designed to enhance employee satisfaction and productivity. Our sustainability initiatives continued with the installation of solar panels expected to reduce energy costs by 15% annually.
+
+    During 2023, we also enhanced our cybersecurity infrastructure following industry best practices. The implementation of multi-factor authentication across all systems was completed in June, and we conducted quarterly penetration testing with third-party security firms. Employee training programs on data privacy and security awareness reached 98% completion rates.
+
+    Our diversified business model delivered consistent performance across all segments throughout 2023. The following table summarizes our quarterly revenue performance by business unit:
+
+    | Business Segment | Q1 2023 | Q2 2023 | Q3 2023 | Q4 2023 | Full Year 2023 |
+    |------------------|---------|---------|---------|---------|----------------|
+    | Cloud Services   | $127.4M | $142.8M | $156.2M | $171.9M | $598.3M        |
+    | Enterprise Software | $89.7M | $94.1M | $102.3M | $108.6M | $394.7M     |
+    | Consulting       | $45.2M  | $41.9M  | $48.7M  | $52.1M  | $187.9M        |
+    | Hardware         | $23.1M  | $19.8M  | $17.4M  | $15.2M  | $75.5M         |
+    | **Total**        | **$285.4M** | **$298.6M** | **$324.6M** | **$347.8M** | **$1,256.4M** |
+
+    Cloud Services continued to be our fastest-growing segment, with Q4 growth of 10.0% compared to Q3. The decline in Hardware revenue reflects our strategic shift toward software and services offerings. We also completed two strategic acquisitions during Q2 that contributed approximately $8.3 million to Enterprise Software revenue in the second half of the year.
+
+    In terms of human resources, we expanded our workforce by 12% during 2023, with particular emphasis on engineering and customer success roles. Our diversity and inclusion initiatives resulted in women representing 42% of new hires, and we established mentorship programs for early-career professionals. The annual employee engagement survey showed a satisfaction score of 8.2 out of 10, up from 7.8 in 2022.
+
+    Looking toward environmental responsibility, we achieved carbon neutrality for our direct operations and established partnerships with three renewable energy providers. Our supply chain sustainability program enrolled 78% of key suppliers, and we published our first comprehensive ESG report in December 2023. Additionally, we launched a customer recycling program for our hardware products, processing over 2,400 units in the pilot phase.
+    </chunk_context>
+
+    Expected Output:
+    {{
+      "summary": "Mixed content covering headquarters relocation, cybersecurity improvements, quarterly revenue performance by business segment, workforce expansion, and sustainability initiatives throughout 2023",
+      "terms": ["headquarters relocation", "Chicago", "March 2023", "450 employees", "sustainability initiatives", "solar panels", "15%", "cybersecurity infrastructure", "multi-factor authentication", "June", "penetration testing", "98%", "quarterly revenue", "2023", "business segments", "Cloud Services", "Q1 2023", "$127.4M", "Q2 2023", "$142.8M", "Q3 2023", "$156.2M", "Q4 2023", "$171.9M", "$598.3M", "Enterprise Software", "$89.7M", "$94.1M", "$102.3M", "$108.6M", "$394.7M", "Consulting", "$45.2M", "$41.9M", "$48.7M", "$52.1M", "$187.9M", "Hardware", "$23.1M", "$19.8M", "$17.4M", "$15.2M", "$75.5M", "Total", "$285.4M", "$298.6M", "$324.6M", "$347.8M", "$1,256.4M", "10.0%", "$8.3 million", "workforce", "12%", "42%", "8.2 out of 10", "7.8", "2022", "carbon neutrality", "78%", "ESG report", "December 2023", "2,400 units"],
+      "evidence": ["| Business Segment | Q1 2023 | Q2 2023 | Q3 2023 | Q4 2023 | Full Year 2023 |\n|------------------|---------|---------|---------|---------|----------------|\n| Cloud Services   | $127.4M | $142.8M | $156.2M | $171.9M | $598.3M        |\n| Enterprise Software | $89.7M | $94.1M | $102.3M | $108.6M | $394.7M     |\n| Consulting       | $45.2M  | $41.9M  | $48.7M  | $52.1M  | $187.9M        |\n| Hardware         | $23.1M  | $19.8M  | $17.4M  | $15.2M  | $75.5M         |\n| **Total**        | **$285.4M** | **$298.6M** | **$324.6M** | **$347.8M** | **$1,256.4M** |", "Cloud Services continued to be our fastest-growing segment, with Q4 growth of 10.0% compared to Q3.", "We also completed two strategic acquisitions during Q2 that contributed approximately $8.3 million to Enterprise Software revenue in the second half of the year."],
+      "answer": "The quarterly revenue figures by business segment for 2023 were: Cloud Services (Q1: $127.4M, Q2: $142.8M, Q3: $156.2M, Q4: $171.9M), Enterprise Software (Q1: $89.7M, Q2: $94.1M, Q3: $102.3M, Q4: $108.6M), Consulting (Q1: $45.2M, Q2: $41.9M, Q3: $48.7M, Q4: $52.1M), and Hardware (Q1: $23.1M, Q2: $19.8M, Q3: $17.4M, Q4: $15.2M).",
+      "relevance_score": 10
+    }}
+  </example_4>
+  </examples>
+
   <context>
   {context}
   </context>
 
   <task>
-  You are an expert financial analyst. Your next task is to provide an intermediate answer of the Map Reduce architecture designed for financial QA. The system receives a final query and a list of chunks of a financial document, it will summarise and extract relevant information from the chunks in the Map phase and then reduce the information to answer the final query in the Reduce phase.
+  You are an expert financial analyst performing the MAP phase of a MapReduce architecture designed for financial QA. In this system, the MAP phase processes individual document chunks in parallel to extract and analyze relevant information, while the REDUCE phase will later synthesize all map outputs to generate the final answer.
 
-  You are given a chunk of a financial document present in <context> and the final query in <final_query>. Based solely on the provided context, your final output has the include the following in their respective tags:
-    - A concise and meaningful summary of the chunk (in <summary>);
-    - A list of all financial terms, concepts, and numbers present in the chunk (in <terms>);
-    - An attempt to answer the final query based on the chunk (in <answer>);
-    - A relevance score of the chunk to the final query (in <relevance_score>);
+  You are given a chunk of a financial document in <context> and the final query in <final_query>. Your task is to analyze this chunk and extract structured information that will support the downstream reduce phase. Base your analysis solely on the provided context and use the examples as templates to guide your approach and output format.
 
-  Output Format:
-  You MUST provide your response as a single, valid JSON object. Do not write any text or explanations outside of the JSON object itself.
+  Required Output:
+  You MUST provide your response as a single, valid JSON object. Do not include any text or explanations outside of the JSON object.
 
   The JSON object must contain five keys:
-    - "summary": A string summarising the chunk.
-    - "terms": An array of strings, each string being a financial term, concept, or number present in the chunk.
-    - "evidence": An array of strings, each string being a literal copy of the evidence in the chunk.
-    - "answer": A string attempting to answer the final query based solely on the given context.
-    - "relevance_score": An integer representing the relevance score of the chunk to the final query. This should be ranked from 0 to 10, with 10 being the most relevant.
+    - "summary": A concise and meaningful summary of the chunk's content
+    - "terms": An array of all financial terms, concepts, and numbers present in the chunk. Extract ALL financial terms, concepts, and numerical values comprehensively. Include any terminology that could be relevant to financial analysis. Don't filter based on the specific query - capture everything. Preserve numbers with their units and context.
+    - "evidence": An array of literal text excerpts from the chunk that contain factual information. Evidence must be exact copies including complete sentences, full tables, or complete relevant sections. Preserve original formatting and structure. Include multiple pieces when available.
+    - "answer": Your attempt to answer the final query based solely on the given context
+    - "relevance_score": An integer from 0 to 10 representing how relevant this chunk is to the final query
 
-  Example in <template> tag.
+  Relevance Score Guidelines:
+    - 9-10: Chunk directly answers the query with specific data, figures, or complete information
+    - 7-8: Chunk contains relevant financial information that partially addresses the query but requires some inference or additional context
+    - 4-6: Chunk provides background context, related information, or indirect relevance to the query topic
+    - 1-3: Chunk mentions the query topic but lacks substantial or useful information for answering the question
+    - 0: Chunk is completely unrelated to the query and contains no relevant information
+
+  See template and examples above for the expected JSON structure and approach.
   </task>
 
   <final_query>

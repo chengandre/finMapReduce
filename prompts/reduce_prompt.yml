@@ -18,19 +18,206 @@ template: |
   }}
   </template>
 
+  <examples>
+  <example_1>
+    <final_query>
+    What was the total revenue for Q4 2023?
+    </final_query>
+    <map_results>
+      <chunk_1>
+        <summary>Q4 2023 financial results showing total revenue of $427.8M (12.3% YoY growth), broken down by business segments</summary>
+        <terms>["Q4 2023", "total revenue", "$427.8 million", "12.3% increase", "Software Solutions", "$245.1 million", "Professional Services", "$142.7 million", "Hardware sales", "$40.0 million"]</terms>
+        <evidence>["Total revenue for the quarter reached $427.8 million, representing a 12.3% increase compared to Q4 2022 revenue of $380.9 million.", "This growth was primarily driven by our Software Solutions division, which contributed $245.1 million, and our Professional Services segment, which generated $142.7 million."]</evidence>
+        <answer>The total revenue for Q4 2023 was $427.8 million.</answer>
+        <relevance_score>10</relevance_score>
+      </chunk_1>
+      <chunk_2>
+        <summary>General business overview mentioning strong performance but no specific Q4 2023 revenue figures</summary>
+        <terms>["business performance", "growth trajectory", "market expansion", "customer satisfaction"]</terms>
+        <evidence>["The company continued to demonstrate strong business performance across all segments.", "Our growth trajectory remains positive with expanding market presence."]</evidence>
+        <answer>Cannot determine Q4 2023 revenue from this chunk as no specific figures are provided.</answer>
+        <relevance_score>2</relevance_score>
+      </chunk_2>
+    </map_results>
+
+    Expected Output:
+    {{
+      "reasoning": "The first chunk (relevance score 10) directly provides the Q4 2023 total revenue figure of $427.8 million with supporting evidence and breakdown by business segments. The second chunk (relevance score 2) contains only general statements without specific revenue data. Since the high-relevance chunk contains complete and authoritative information that directly answers the query, no synthesis is required.",
+      "evidence": ["Total revenue for the quarter reached $427.8 million, representing a 12.3% increase compared to Q4 2022 revenue of $380.9 million.", "This growth was primarily driven by our Software Solutions division, which contributed $245.1 million, and our Professional Services segment, which generated $142.7 million."],
+      "answer": "$427.8 million"
+    }}
+  </example_1>
+
+  <example_2>
+    <final_query>
+    What were the main factors contributing to the increase in operating expenses?
+    </final_query>
+    <map_results>
+      <chunk_1>
+        <summary>R&D expense increases due to headcount expansion and new facility setup</summary>
+        <terms>["research and development", "145 employees", "189 employees", "AI research lab", "$12.3 million", "MIT collaboration", "$4.7 million"]</terms>
+        <evidence>["Our research and development team expanded from 145 employees at the beginning of the year to 189 employees by December 31, 2023.", "During the third quarter, we established a new artificial intelligence research lab in Austin, Texas, with an initial setup cost of $12.3 million.", "We entered into several strategic partnerships with universities, including a $4.7 million collaboration agreement with MIT."]</evidence>
+        <answer>R&D expenses increased due to team expansion (44 additional employees), new AI lab setup ($12.3M), and university partnerships ($4.7M MIT collaboration).</answer>
+        <relevance_score>8</relevance_score>
+      </chunk_1>
+      <chunk_2>
+        <summary>Sales and marketing expense increases and compensation cost information</summary>
+        <terms>["sales and marketing expenses", "$89.4 million", "$82.1 million", "compensation costs", "8.2%", "digital advertising"]</terms>
+        <evidence>["Sales and marketing expenses rose to $89.4 million for the full year, up from $82.1 million in 2022, primarily due to increased digital advertising spend.", "Total compensation costs across all departments increased by 8.2% year-over-year."]</evidence>
+        <answer>Sales and marketing expenses increased by $7.3M due to digital advertising, and overall compensation costs rose 8.2%.</answer>
+        <relevance_score>7</relevance_score>
+      </chunk_2>
+      <chunk_3>
+        <summary>General administrative information without specific expense details</summary>
+        <terms>["administrative procedures", "policy updates", "governance"]</terms>
+        <evidence>["The company updated various administrative procedures during the year."]</evidence>
+        <answer>No specific operating expense factors mentioned in this section.</answer>
+        <relevance_score>1</relevance_score>
+      </chunk_3>
+    </map_results>
+
+    Expected Output:
+    {{
+      "reasoning": "Two chunks provide relevant information about operating expense increases. The first chunk (relevance score 8) details R&D expense drivers: headcount expansion from 145 to 189 employees, AI lab setup costs of $12.3M, and MIT collaboration of $4.7M. The second chunk (relevance score 7) identifies sales/marketing expense increases of $7.3M for digital advertising and overall 8.2% compensation cost increases. The third chunk (relevance score 1) lacks specific expense information. Synthesis combines the specific factors from both relevant chunks.",
+      "evidence": ["Our research and development team expanded from 145 employees at the beginning of the year to 189 employees by December 31, 2023.", "During the third quarter, we established a new artificial intelligence research lab in Austin, Texas, with an initial setup cost of $12.3 million.", "We entered into several strategic partnerships with universities, including a $4.7 million collaboration agreement with MIT.", "Sales and marketing expenses rose to $89.4 million for the full year, up from $82.1 million in 2022, primarily due to increased digital advertising spend.", "Total compensation costs across all departments increased by 8.2% year-over-year."],
+      "answer": "The main factors contributing to increased operating expenses were: R&D expansion (44 additional employees, $12.3M AI lab setup, $4.7M university partnerships), sales and marketing increases ($7.3M higher spend on digital advertising), and overall compensation cost increases of 8.2% across all departments."
+    }}
+  </example_2>
+
+  <example_3>
+    <final_query>
+    What was the debt-to-equity ratio at the end of fiscal year 2023?
+    </final_query>
+    <map_results>
+      <chunk_1>
+        <summary>Balance sheet information with total debt and equity figures</summary>
+        <terms>["total debt", "$450.2 million", "stockholders equity", "$892.3 million", "December 31, 2023"]</terms>
+        <evidence>["As of December 31, 2023, total debt was $450.2 million and total stockholders' equity was $892.3 million."]</evidence>
+        <answer>Debt-to-equity ratio can be calculated as $450.2M / $892.3M = 0.50</answer>
+        <relevance_score>9</relevance_score>
+      </chunk_1>
+      <chunk_2>
+        <summary>Alternative balance sheet section with different debt figure</summary>
+        <terms>["long term debt", "$425.8 million", "shareholders equity", "$892.3 million", "year end 2023"]</terms>
+        <evidence>["The company's long-term debt totaled $425.8 million at year-end 2023, with shareholders' equity of $892.3 million."]</evidence>
+        <answer>Using long-term debt only: $425.8M / $892.3M = 0.48</answer>
+        <relevance_score>8</relevance_score>
+      </chunk_2>
+      <chunk_3>
+        <summary>Cash flow information unrelated to balance sheet ratios</summary>
+        <terms>["operating cash flow", "$156.7 million", "working capital"]</terms>
+        <evidence>["Operating cash flow for 2023 was $156.7 million."]</evidence>
+        <answer>Cannot calculate debt-to-equity ratio from cash flow information.</answer>
+        <relevance_score>1</relevance_score>
+      </chunk_3>
+    </map_results>
+
+    Expected Output:
+    {{
+      "reasoning": "Two chunks contain conflicting debt information for the same period. The first chunk (relevance score 9) reports total debt of $450.2M, while the second chunk (relevance score 8) reports long-term debt of $425.8M. Both use the same equity figure of $892.3M. The difference ($24.4M) likely represents short-term debt. Since debt-to-equity ratio typically uses total debt, the first chunk's figure is more appropriate. The third chunk (relevance score 1) provides unrelated cash flow data.",
+      "evidence": ["As of December 31, 2023, total debt was $450.2 million and total stockholders' equity was $892.3 million."],
+      "answer": "0.50"
+    }}
+  </example_3>
+
+  <example_4>
+    <final_query>
+    What was the impact of foreign exchange fluctuations on Q3 2023 revenue?
+    </final_query>
+    <map_results>
+      <chunk_1>
+        <summary>Q3 2023 revenue breakdown without specific FX impact disclosure</summary>
+        <terms>["Q3 2023", "revenue", "$267.4 million", "international revenue", "$68.7 million"]</terms>
+        <evidence>["Total revenue for Q3 2023 was $267.4 million, including international revenue of $68.7 million."]</evidence>
+        <answer>No specific foreign exchange impact information provided.</answer>
+        <relevance_score>3</relevance_score>
+      </chunk_1>
+      <chunk_2>
+        <summary>General discussion of international operations without Q3 2023 FX details</summary>
+        <terms>["international markets", "currency exposure", "hedging strategies"]</terms>
+        <evidence>["The company maintains operations in international markets with various currency exposures and employs hedging strategies."]</evidence>
+        <answer>General currency exposure mentioned but no Q3 2023 specific impact quantified.</answer>
+        <relevance_score>2</relevance_score>
+      </chunk_2>
+      <chunk_3>
+        <summary>Unrelated financial metrics for different time period</summary>
+        <terms>["Q2 2023", "gross margin", "operational efficiency"]</terms>
+        <evidence>["Q2 2023 showed improved gross margins and operational efficiency."]</evidence>
+        <answer>Information relates to Q2 2023, not relevant to Q3 2023 FX impact query.</answer>
+        <relevance_score>0</relevance_score>
+      </chunk_3>
+    </map_results>
+
+    Expected Output:
+    {{
+      "reasoning": "None of the chunks provide specific information about foreign exchange impact on Q3 2023 revenue. The first chunk (relevance score 3) shows Q3 2023 revenue figures including international revenue but lacks FX impact disclosure. The second chunk (relevance score 2) mentions general currency exposure without specific quantification. The third chunk (relevance score 0) relates to a different time period. Without specific FX impact data in any chunk, the question cannot be answered from the provided information.",
+      "evidence": ["Total revenue for Q3 2023 was $267.4 million, including international revenue of $68.7 million.", "The company maintains operations in international markets with various currency exposures and employs hedging strategies."],
+      "answer": "Cannot determine the specific impact of foreign exchange fluctuations on Q3 2023 revenue from the provided information."
+    }}
+  </example_4>
+
+  <example_5>
+    <final_query>
+    What were the quarterly revenue figures for each business segment in 2023?
+    </final_query>
+    <map_results>
+      <chunk_1>
+        <summary>Q1 and Q2 2023 revenue by business segment</summary>
+        <terms>["Q1 2023", "Q2 2023", "Cloud Services", "$127.4M", "$142.8M", "Enterprise Software", "$89.7M", "$94.1M", "Consulting", "$45.2M", "$41.9M"]</terms>
+        <evidence>["Q1 2023 revenue: Cloud Services $127.4M, Enterprise Software $89.7M, Consulting $45.2M", "Q2 2023 revenue: Cloud Services $142.8M, Enterprise Software $94.1M, Consulting $41.9M"]</evidence>
+        <answer>Partial data available for Q1-Q2 2023 by segment but missing Q3-Q4 figures.</answer>
+        <relevance_score>6</relevance_score>
+      </chunk_1>
+      <chunk_2>
+        <summary>Q3 and Q4 2023 revenue by business segment</summary>
+        <terms>["Q3 2023", "Q4 2023", "Cloud Services", "$156.2M", "$171.9M", "Enterprise Software", "$102.3M", "$108.6M", "Consulting", "$48.7M", "$52.1M"]</terms>
+        <evidence>["Q3 2023 revenue: Cloud Services $156.2M, Enterprise Software $102.3M, Consulting $48.7M", "Q4 2023 revenue: Cloud Services $171.9M, Enterprise Software $108.6M, Consulting $52.1M"]</evidence>
+        <answer>Partial data available for Q3-Q4 2023 by segment but missing Q1-Q2 figures.</answer>
+        <relevance_score>6</relevance_score>
+      </chunk_2>
+      <chunk_3>
+        <summary>Hardware segment revenue for all quarters 2023</summary>
+        <terms>["Hardware", "Q1 2023", "$23.1M", "Q2 2023", "$19.8M", "Q3 2023", "$17.4M", "Q4 2023", "$15.2M"]</terms>
+        <evidence>["Hardware revenue by quarter: Q1 $23.1M, Q2 $19.8M, Q3 $17.4M, Q4 $15.2M"]</evidence>
+        <answer>Complete Hardware segment quarterly data available for 2023.</answer>
+        <relevance_score>8</relevance_score>
+      </chunk_3>
+    </map_results>
+
+    Expected Output:
+    {{
+      "reasoning": "The query requires complete quarterly revenue data for all business segments in 2023. Three chunks provide complementary information: the first chunk (relevance score 6) covers Q1-Q2 for Cloud Services, Enterprise Software, and Consulting; the second chunk (relevance score 6) covers Q3-Q4 for the same segments; the third chunk (relevance score 8) provides complete quarterly data for Hardware. Synthesis combines all three chunks to provide the complete quarterly breakdown requested.",
+      "evidence": ["Q1 2023 revenue: Cloud Services $127.4M, Enterprise Software $89.7M, Consulting $45.2M", "Q2 2023 revenue: Cloud Services $142.8M, Enterprise Software $94.1M, Consulting $41.9M", "Q3 2023 revenue: Cloud Services $156.2M, Enterprise Software $102.3M, Consulting $48.7M", "Q4 2023 revenue: Cloud Services $171.9M, Enterprise Software $108.6M, Consulting $52.1M", "Hardware revenue by quarter: Q1 $23.1M, Q2 $19.8M, Q3 $17.4M, Q4 $15.2M"],
+      "answer": "2023 quarterly revenue by business segment: Cloud Services (Q1: $127.4M, Q2: $142.8M, Q3: $156.2M, Q4: $171.9M), Enterprise Software (Q1: $89.7M, Q2: $94.1M, Q3: $102.3M, Q4: $108.6M), Consulting (Q1: $45.2M, Q2: $41.9M, Q3: $48.7M, Q4: $52.1M), Hardware (Q1: $23.1M, Q2: $19.8M, Q3: $17.4M, Q4: $15.2M)."
+    }}
+  </example_5>
+  </examples>
+
   <map_results>
   {map_results}
   </map_results>
 
   <task>
-  You are an expert financial analyst. Your next task is to provide a final answer to the query of the MapReduce architecture designed for financial QA, i.e. your output is the final answer of the Reduce phase. The system receives a final query and a list of chunks of a financial document, it will summarise and extract relevant information from the chunks in the Map phase and then reduce the information to answer the final query in the Reduce phase.
+  You are an expert financial analyst performing the critical REDUCE phase of a MapReduce QA system. Unlike the MAP phase which analyzes individual document chunks in isolation, your role is to synthesize all map results into a cohesive, accurate final answer.
 
-  You are given the user query in <final_query> and all the map results from the Map phase in <map_results>. In <map_results> you will find the outputs from the Map phase, each of which contain:
-    - a summary of a chunk of the financial document
-    - a list of all financial terms, concepts, and numbers present in that chunk
-    - the evidence to backup the attempt answer. These will be needed to back up your final answer.
-    - an attempt to answer the final query
-    - the relevance score of the chunk to the final query.
+  In this MapReduce QA system, the MAP phase processes individual document chunks in parallel to extract and analyze relevant information, while the REDUCE phase synthesizes all map outputs to generate the final answer.
+
+  You are given the user query in <final_query> and all the map results from the Map phase in <map_results>. Each chunk in <map_results> is structured with XML tags containing:
+    - <summary>: A concise overview of the document chunk content
+    - <terms>: Array of financial terms, concepts, and numbers present in the chunk
+    - <evidence>: Array of literal text excerpts that support the attempted answer
+    - <answer>: The chunk-specific attempt to answer the final query
+    - <relevance_score>: Integer from 0-10 indicating chunk relevance to the query
+
+  Use the examples provided in the <examples> section above as templates to guide your synthesis approach and reasoning methodology.
+
+  Synthesis Responsibilities:
+  - Prioritize by relevance: 9-10 (primary), 6-8 (supporting), 1-5 (minimal use), 0 (ignore)
+  - Integrate complementary information from multiple chunks
+  - Resolve conflicts: prefer higher relevance, specific data, recent information
+  - Consolidate evidence: combine non-redundant quotes, maintain precision
+  - Handle edge cases like insufficient or conflicting information
+  - Calculations: use most authoritative source, document methodology
 
   Output Format:
   You MUST provide your response as a single, valid JSON object. Do not write any text or explanations outside of the JSON object itself.
@@ -40,7 +227,7 @@ template: |
     - "evidence": An array of strings containing the literal copied evidence from the context.
     - "answer": A string containing your final concise and direct answer to the user query based solely on the given map results. This should not be a summary of a paraphrase, refrain from adding any explanations and clarifications, all these should be included in the reasoning process.
 
-  Example in <template> tag.
+  See template above for the expected JSON structure.
   </task>
 
   <final_query>

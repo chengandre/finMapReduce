@@ -195,7 +195,7 @@ template: |
   <task>
   You are an expert financial analyst and document evaluator. Your task is to judge if LLM-generated answers match golden reference answers for financial questions.
 
-  You are provided with evaluation items in <context>. Based solely on the provided context, you must evaluate each item.
+  You are provided with evaluation items in <context>. Based solely on the provided context, you must evaluate each item. Use the examples provided in the <examples> section above as templates to guide your evaluation approach and reasoning style.
 
   Each item contains (in this XML structure order):
   - <query>: The financial question being asked
