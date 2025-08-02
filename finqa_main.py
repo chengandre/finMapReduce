@@ -31,10 +31,23 @@ def main():
                       help='API key selector: "self" uses SELF_OPENAI_API_KEY, otherwise uses OPENAI_API_KEY')
     parser.add_argument('--use_old_prompts', action='store_true',
                       help='Use old prompt versions instead of the default ones')
+    parser.add_argument('--requests_per_minute', type=int, default=5000,
+                      help='Maximum requests per minute for rate limiting')
+    parser.add_argument('--tokens_per_minute', type=int, default=4000000,
+                      help='Maximum tokens per minute for rate limiting')
+    parser.add_argument('--request_burst_size', type=int, default=500,
+                      help='Maximum burst size for requests')
+    
     args = parser.parse_args()
 
+    config = {
+        'requests_per_minute': args.requests_per_minute,
+        'tokens_per_minute': args.tokens_per_minute,
+        'request_burst_size': args.request_burst_size
+    }
+
     print(f"Loading model: {args.model_name}")
-    llm = RateLimitedGPT(model_name=args.model_name, temperature=args.temperature, max_tokens=args.max_tokens, provider=args.provider, key=args.key)
+    llm = RateLimitedGPT(model_name=args.model_name, temperature=args.temperature, max_tokens=args.max_tokens, provider=args.provider, key=args.key, config=config)
 
     print(f"\nCONFIGURATION:")
     print(f"  Model name: {args.model_name}")
@@ -45,6 +58,9 @@ def main():
     print(f"  Max tokens: {args.max_tokens}")
     print(f"  Key: {args.key if args.key else 'default'}")
     print(f"  Path: {args.json_path}")
+    print(f"  Requests per minute: {args.requests_per_minute}")
+    print(f"  Tokens per minute: {args.tokens_per_minute}")
+    print(f"  Request burst size: {args.request_burst_size}")
 
     results = process_finqa_qa(
         json_path=args.json_path,

@@ -8,6 +8,8 @@ import threading
 import subprocess
 import uuid
 import logging
+import pickle
+import hashlib
 
 from pathlib import Path
 from pydantic import SecretStr
@@ -465,6 +467,93 @@ def num_tokens_from_string(string: str, encoding_name: str) -> int:
     return num_tokens
 
 
+def _get_pdf_cache_path(pdf_file, method, chunk_size, chunk_overlap):
+    """
+    Generate a cache file path for PDF parsing results based on file content and parameters.
+    
+    Args:
+        pdf_file (str): Path to the PDF file
+        method (str): PDF parsing method used
+        chunk_size (int): Chunk size parameter
+        chunk_overlap (int): Chunk overlap parameter
+    
+    Returns:
+        Path: Path to the cache file
+    """
+    # Create a hash of the file content + parameters for cache key
+    pdf_path = Path(pdf_file)
+    
+    # Get file modification time and size for cache validity
+    try:
+        stat = pdf_path.stat()
+        file_info = f"{stat.st_mtime}_{stat.st_size}"
+    except (OSError, FileNotFoundError):
+        file_info = "unknown"
+    
+    # Create hash of filename, method, parameters, and file info
+    cache_key = f"{pdf_path.name}_{method}_{chunk_size}_{chunk_overlap}_{file_info}"
+    cache_hash = hashlib.md5(cache_key.encode()).hexdigest()
+    
+    # Create cache directory structure
+    cache_dir = Path("pdf_cache") / method
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    
+    return cache_dir / f"{pdf_path.stem}_{cache_hash}.pkl"
+
+
+def _save_pdf_cache(cache_path, documents, token_count):
+    """
+    Save PDF parsing results to cache.
+    
+    Args:
+        cache_path (Path): Path to save the cache file
+        documents (list): List of Document objects
+        token_count (int): Token count for the documents
+    """
+    try:
+        cache_data = {
+            'documents': documents,
+            'token_count': token_count,
+            'timestamp': time.time()
+        }
+        
+        with open(cache_path, 'wb') as f:
+            pickle.dump(cache_data, f)
+        
+        # print(f"Saved PDF parsing results to cache: {cache_path}")
+        
+    except Exception as e:
+        print(f"Warning: Failed to save PDF cache: {e}")
+
+
+def _load_pdf_cache(cache_path):
+    """
+    Load PDF parsing results from cache.
+    
+    Args:
+        cache_path (Path): Path to the cache file
+    
+    Returns:
+        tuple: (documents, token_count) or (None, None) if cache invalid/missing
+    """
+    try:
+        if not cache_path.exists():
+            return None, None
+        
+        with open(cache_path, 'rb') as f:
+            cache_data = pickle.load(f)
+        
+        documents = cache_data.get('documents', [])
+        token_count = cache_data.get('token_count', 0)
+
+        # print(f"Loaded PDF parsing results from cache: {cache_path}")
+        return documents, token_count
+        
+    except Exception as e:
+        print(f"Warning: Failed to load PDF cache: {e}")
+        return None, None
+
+
 def _marker_parser(pdf_file, force_reparse=False):
     """
     Parse a PDF file using the marker CLI tool and convert to markdown.
@@ -537,7 +626,7 @@ def _process_documents(documents, chunk_size, chunk_overlap, use_tiktoken=False)
     return split_documents, token_count
 
 
-def load_pdf_chunk(pdf_file, chunk_size, chunk_overlap, method):
+def load_pdf_chunk(pdf_file, chunk_size, chunk_overlap, method, force_reparse=False):
     """
     The function loads a pdf file and makes it ready for querying
 
@@ -546,6 +635,7 @@ def load_pdf_chunk(pdf_file, chunk_size, chunk_overlap, method):
         chunk_size (int): size of each chunk
         chunk_overlap (int): overlap between chunks
         method (str): method to use for PDF parsing
+        force_reparse (bool): whether to bypass cache and reparse the PDF
 
     Returns:
         pages (list): list of all the pages in the pdf
@@ -567,8 +657,16 @@ def load_pdf_chunk(pdf_file, chunk_size, chunk_overlap, method):
         print("Marker parsing failed, falling back to PDFMinerLoader")
         method = "default"
 
+    # Check cache for non-marker methods (only if not forcing reparse)
+    if not force_reparse:
+        cache_path = _get_pdf_cache_path(pdf_file, method, chunk_size, chunk_overlap)
+        cached_documents, cached_token_count = _load_pdf_cache(cache_path)
+        
+        if cached_documents is not None:
+            return cached_documents, cached_token_count
+
     # Handle all other loader methods
-    if method == "Load page-wise PDF":
+    if method == "pypdf":
         loader = PyPDFLoader(pdf_file)
     elif method == "pymu":
         loader = PyMuPDFLoader(pdf_file)
@@ -578,7 +676,14 @@ def load_pdf_chunk(pdf_file, chunk_size, chunk_overlap, method):
         loader = PDFMinerLoader(pdf_file)
 
     documents = loader.load()
-    return _process_documents(documents, chunk_size, chunk_overlap, use_tiktoken=True)
+    split_documents, token_count = _process_documents(documents, chunk_size, chunk_overlap, use_tiktoken=True)
+    
+    # Save to cache for future use (except for marker method which has its own caching)
+    if method != "marker":
+        cache_path = _get_pdf_cache_path(pdf_file, method, chunk_size, chunk_overlap)
+        _save_pdf_cache(cache_path, split_documents, token_count)
+    
+    return split_documents, token_count
 
 
 def load_markdown_chunk(markdown_file, chunk_size, chunk_overlap):

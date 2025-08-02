@@ -22,140 +22,6 @@ def preprocess_results(results):
     return modified_results
 
 
-def mapreduce_qa_documents(llm, chunked_docs, final_query, map_query, use_old_prompts=False):
-    """
-    The function helps in querying pdf for questions
-
-    Args:
-        llm: the langauge model on which queries/summarsation would be done on
-        documents (list): the pages on which summarisation would work on
-        query (str): the question to be asked for the document
-
-    Returns:
-        result_final (str): the final result of the entire query
-        results (list): the intermediate response for the question asked
-        total_docs (int): total chunks used to process the pdf
-        time_to_process (float): the time taken to process the entire file
-        token_stats (dict): statistics of token usage for map and reduce phases
-
-    """
-    # Split the documents into smaller chunks
-
-    t1 = time.time()
-
-    # Load prompts from YAML
-    map_prompt_file = "prompts/map_prompt_old.yml" if use_old_prompts else "prompts/map_prompt.yml"
-    map_prompt = load_prompt(map_prompt_file)
-    total_docs = len(chunked_docs)
-
-    # Track map phase token usage
-    map_input_tokens = 0
-    map_output_tokens = 0
-
-    def process_chunk(chunk):
-        return llm(map_prompt, context=chunk, final_query=final_query)
-
-    print("Map phase started, calling LLMs")
-    with concurrent.futures.ThreadPoolExecutor() as executor:
-        results = list(executor.map(process_chunk, chunked_docs))
-    print("Map phase completed")
-    print("Results:")
-    print(results)
-
-    # Count tokens from map phase using usage_metadata from raw_response
-    for result in results:
-        raw_response = result.get('raw_response')
-        if raw_response and hasattr(raw_response, 'usage_metadata') and raw_response.usage_metadata:
-            map_input_tokens += raw_response.usage_metadata.get("input_tokens", 0)
-            map_output_tokens += raw_response.usage_metadata.get("output_tokens", 0)
-
-    # modified_results = preprocess_results(results=results)
-
-    # Load reduce prompt
-    reduce_prompt_file = "prompts/reduce_prompt_old.yml" if use_old_prompts else "prompts/reduce_prompt.yml"
-    reduce_prompt = load_prompt(reduce_prompt_file)
-
-    # Extract content from results for reduce phase - handle JSON format with XML structure
-    processed_results = []
-    for i, result in enumerate(results, 1):
-        # Get JSON data from the wrapper result
-        result_json = result.get('json', {})
-        if result_json:
-            # Format the JSON data as XML for the reduce phase
-            chunk_xml = f"      <chunk_{i}>\n"
-            chunk_xml += f"        <summary>{result_json.get('summary', '')}</summary>\n"
-            chunk_xml += f"        <terms>{result_json.get('terms', [])}</terms>\n"
-            chunk_xml += f"        <evidence>{result_json.get('evidence', [])}</evidence>\n"
-            chunk_xml += f"        <answer>{result_json.get('answer', '')}</answer>\n"
-            chunk_xml += f"        <relevance_score>{result_json.get('relevance_score', 0)}</relevance_score>\n"
-            chunk_xml += f"      </chunk_{i}>"
-            processed_results.append(chunk_xml)
-        else:
-            # Fallback to raw response content in XML format
-            raw_response = result.get('raw_response')
-            if raw_response:
-                content = raw_response.content if hasattr(raw_response, 'content') else str(raw_response)
-                chunk_xml = f"      <chunk_{i}>\n"
-                chunk_xml += f"        <summary>Raw response content</summary>\n"
-                chunk_xml += f"        <terms>[]</terms>\n"
-                chunk_xml += f"        <evidence>[\"{content}\"]</evidence>\n"
-                chunk_xml += f"        <answer>{content}</answer>\n"
-                chunk_xml += f"        <relevance_score>0</relevance_score>\n"
-                chunk_xml += f"      </chunk_{i}>"
-                processed_results.append(chunk_xml)
-
-    results_text = "\n".join(processed_results)
-    result_final = llm(reduce_prompt, map_results=results_text, final_query=final_query)
-
-    # Count tokens from reduce phase using usage_metadata from raw_response
-    reduce_input_tokens = 0
-    reduce_output_tokens = 0
-    final_raw_response = result_final.get('raw_response')
-    if final_raw_response and hasattr(final_raw_response, 'usage_metadata') and final_raw_response.usage_metadata:
-        reduce_input_tokens = final_raw_response.usage_metadata.get("input_tokens", 0)
-        reduce_output_tokens = final_raw_response.usage_metadata.get("output_tokens", 0)
-
-    time_to_process = time.time() - t1
-
-    # Prepare token statistics
-    token_stats = {
-        "map_phase": {
-            "input_tokens": map_input_tokens,
-            "output_tokens": map_output_tokens
-        },
-        "reduce_phase": {
-            "input_tokens": reduce_input_tokens,
-            "output_tokens": reduce_output_tokens
-        },
-        "total": {
-            "input_tokens": map_input_tokens + reduce_input_tokens,
-            "output_tokens": map_output_tokens + reduce_output_tokens
-        }
-    }
-
-    # print(modified_results)
-    return result_final, results, total_docs, time_to_process, token_stats
-
-
-def process_mapreduce_qa(files, selected_questions_dict, model_name, llm,
-                         chunk_size, token_overlap, method="marker"):
-    documents, token_count = [], 0
-    for i in range(len(files)):
-        temp_documents, temp_token_count = load_pdf_chunk(files[i], chunk_size, token_overlap, method=method)
-        documents += temp_documents
-        token_count += temp_token_count
-    print("Documents loaded")
-    final_answer_responses = []
-    for final_query, map_query in selected_questions_dict.items():
-        response_dict = {"chain": "MapReduce", "execution_time": datetime.now(), "model_name": model_name,
-                         "query": final_query}
-
-        response_dict["answer"], response_dict["int_result"], response_dict["total_chunks"], \
-            response_dict["time_taken"], response_dict["token_stats"] = mapreduce_qa_documents(llm, documents, final_query, map_query)
-        final_answer_responses.append(response_dict)
-    return final_answer_responses
-
-
 def load_financebench_data(jsonl_path, num_samples=None):
     """
     Load QA pairs from financebench_open_source.jsonl file
@@ -412,7 +278,7 @@ def evaluate_with_llm_judge(llm, qa_data, batch_size=5):
     return results
 
 
-def process_single_qa(qa_pair, llm, chunk_size=36000, chunk_overlap=1000, use_old_prompts=False):
+def process_single_qa(qa_pair, llm, chunk_size=36000, chunk_overlap=1000, use_old_prompts=False, pdf_parser="marker"):
     """
     Process a single QA pair from financebench.
 
@@ -422,6 +288,7 @@ def process_single_qa(qa_pair, llm, chunk_size=36000, chunk_overlap=1000, use_ol
         chunk_size (int): Size of each document chunk
         chunk_overlap (int): Overlap between document chunks
         use_old_prompts (bool): Whether to use old prompt versions
+        pdf_parser (str): PDF parsing method to use (default: "marker")
 
     Returns:
         dict: Updated QA pair with LLM answer and token stats
@@ -431,7 +298,7 @@ def process_single_qa(qa_pair, llm, chunk_size=36000, chunk_overlap=1000, use_ol
     question = qa_pair["question"]
 
     # Load document chunks
-    docs, token_count = load_pdf_chunk(doc_name, chunk_size, chunk_overlap, method="marker")
+    docs, token_count = load_pdf_chunk(doc_name, chunk_size, chunk_overlap, method=pdf_parser)
 
     # Load prompts from YAML
     map_prompt_file = "prompts/map_prompt_old.yml" if use_old_prompts else "prompts/map_prompt.yml"
@@ -453,7 +320,7 @@ def process_single_qa(qa_pair, llm, chunk_size=36000, chunk_overlap=1000, use_ol
     if len(doc_basename) > 20:
         doc_basename = doc_basename[:17] + "..."
 
-    with concurrent.futures.ThreadPoolExecutor(min(chunks_count, 20)) as executor:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=chunks_count) as executor:
         # Submit all chunk processing tasks
         futures = {
             executor.submit(process_chunk, chunk): i
@@ -621,7 +488,7 @@ def process_single_finqa(qa_pair, llm, doc_dir, chunk_size=36000, chunk_overlap=
     if len(doc_basename) > 20:
         doc_basename = doc_basename[:17] + "..."
 
-    with concurrent.futures.ThreadPoolExecutor(min(chunks_count, 10)) as executor:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=chunks_count) as executor:
         # Submit all chunk processing tasks
         futures = {
             executor.submit(process_chunk, chunk): i
@@ -728,7 +595,7 @@ def process_single_finqa(qa_pair, llm, doc_dir, chunk_size=36000, chunk_overlap=
     return qa_pair
 
 
-def process_financebench_qa(jsonl_path, model_name, llm, num_samples=None, chunk_size=36000, chunk_overlap=1000, max_concurrent_qa=3, use_old_prompts=False):
+def process_financebench_qa(jsonl_path, model_name, llm, num_samples=None, chunk_size=36000, chunk_overlap=1000, max_concurrent_qa=3, use_old_prompts=False, pdf_parser="marker"):
     """
     Process QA from financebench with parallel processing of QA pairs.
 
@@ -741,6 +608,7 @@ def process_financebench_qa(jsonl_path, model_name, llm, num_samples=None, chunk
         chunk_overlap (int): Overlap between document chunks
         max_concurrent_qa (int): Maximum number of QA pairs to process concurrently
         use_old_prompts (bool): Whether to use old prompt versions
+        pdf_parser (str): PDF parsing method to use (default: "marker")
 
     Returns:
         dict: Results containing model answers, golden answers, and evaluation results
@@ -762,7 +630,7 @@ def process_financebench_qa(jsonl_path, model_name, llm, num_samples=None, chunk
     with concurrent.futures.ThreadPoolExecutor(max_workers=max_concurrent_qa) as executor:
         # Submit all QA processing tasks
         future_to_qa = {
-            executor.submit(process_single_qa, qa_pair, llm, chunk_size, chunk_overlap, use_old_prompts): i
+            executor.submit(process_single_qa, qa_pair, llm, chunk_size, chunk_overlap, use_old_prompts, pdf_parser): i
             for i, qa_pair in enumerate(qa_data)
         }
 

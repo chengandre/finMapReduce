@@ -19,19 +19,34 @@ def main():
                       help='Overlap between chunks')
     parser.add_argument('--verbose', action='store_true',
                       help='Print detailed results for each QA pair')
-    parser.add_argument('--max_tokens', type=int, default=8000,
+    parser.add_argument('--max_tokens', type=int, default=4096,
                       help='Maximum number of tokens for the LLM')
     parser.add_argument('--provider', type=str, default="openai",
                       help='Provider of the LLM')
-    parser.add_argument('--max_concurrent_qa', type=int, default=20,
+    parser.add_argument('--max_concurrent_qa', type=int, default=40,
                       help='Maximum number of QA pairs to process concurrently')
     parser.add_argument('--key', type=str, default=None,
                       help='API key selector: "self" uses SELF_OPENAI_API_KEY, otherwise uses OPENAI_API_KEY')
     parser.add_argument('--use_old_prompts', action='store_true',
                       help='Use old prompt versions instead of the default ones')
+    parser.add_argument('--requests_per_minute', type=int, default=5000,
+                      help='Maximum requests per minute for rate limiting')
+    parser.add_argument('--tokens_per_minute', type=int, default=4000000,
+                      help='Maximum tokens per minute for rate limiting')
+    parser.add_argument('--request_burst_size', type=int, default=500,
+                      help='Maximum burst size for requests')
+    parser.add_argument('--pdf_parser', type=str, default="marker",
+                      help='PDF parsing method to use (default: marker)')
+    
     args = parser.parse_args()
 
-    llm = RateLimitedGPT(model_name=args.model_name, temperature=args.temperature, max_tokens=args.max_tokens, provider=args.provider, key=args.key)
+    config = {
+            'requests_per_minute': args.requests_per_minute,
+            'tokens_per_minute': args.tokens_per_minute,
+            'request_burst_size': args.request_burst_size
+        }
+
+    llm = RateLimitedGPT(model_name=args.model_name, temperature=args.temperature, max_tokens=args.max_tokens, provider=args.provider, key=args.key, rate_limit_config=config)
 
     print(f"\nCONFIGURATION:")
     print(f"  Model name: {args.model_name}")
@@ -42,6 +57,11 @@ def main():
     print(f"  Max tokens: {args.max_tokens}")
     print(f"  Key: {args.key if args.key else 'default'}")
     print(f"  Path: {args.jsonl_path}")
+    print(f"  Prompt: {'old' if args.use_old_prompts else 'new'}")
+    print(f"  Requests per minute: {args.requests_per_minute}")
+    print(f"  Tokens per minute: {args.tokens_per_minute}")
+    print(f"  Request burst size: {args.request_burst_size}")
+    print(f"  PDF parser: {args.pdf_parser}")
 
     results = process_financebench_qa(
         jsonl_path=args.jsonl_path,
@@ -51,7 +71,8 @@ def main():
         chunk_size=args.chunk_size,
         chunk_overlap=args.chunk_overlap,
         max_concurrent_qa=args.max_concurrent_qa,
-        use_old_prompts=args.use_old_prompts
+        use_old_prompts=args.use_old_prompts,
+        pdf_parser=args.pdf_parser
     )
 
     # Print summary results
