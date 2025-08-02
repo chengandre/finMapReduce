@@ -217,21 +217,245 @@ class TokenBucketRateLimiter:
                 time.sleep(wait_time)
 
 
-class RateLimitedGPT(GPT):
-    """GPT wrapper with shared token bucket rate limiting"""
+class DualRateLimiter:
+    """
+    Thread-safe rate limiter managing both request and token limits using token bucket algorithm.
+    
+    Enforces both requests-per-minute and tokens-per-minute limits with configurable burst sizes.
+    Designed for development and testing with multiple concurrent API calls.
+    """
 
-    # Class-level rate limiter shared across all instances
-    _rate_limiter = TokenBucketRateLimiter(
-        calls_per_minute=500,    # Conservative API limit
-        burst_size=100           # Allow bursts for chunk processing
-    )
+    def __init__(self, config):
+        """
+        Initialize the dual rate limiter.
+        
+        Args:
+            config (dict): Configuration with keys:
+                - requests_per_minute: Maximum requests per minute
+                - tokens_per_minute: Maximum tokens per minute
+                - request_burst_size: Maximum burst requests (optional, default: 10)
+                - token_burst_size: Maximum burst tokens (optional, auto-calculated)
+        """
+        # Configuration
+        self.requests_per_minute = config['requests_per_minute']
+        self.tokens_per_minute = config['tokens_per_minute']
+        self.request_burst_size = config.get('request_burst_size', 10)
+        self.token_burst_size = config.get('token_burst_size', 
+                                          int(self.tokens_per_minute / 60 * 2))  # 2 seconds of tokens
+        
+        # Bucket state
+        self.request_bucket = float(self.request_burst_size)
+        self.token_bucket = float(self.token_burst_size)
+        self.last_refill_time = time.time()
+        
+        # Thread safety
+        self._lock = threading.Lock()
+        
+        # Metrics
+        self.stats = {
+            'total_requests': 0,
+            'total_tokens': 0,
+            'total_wait_time': 0.0,
+            'request_limited_count': 0,
+            'token_limited_count': 0
+        }
+
+    def _refill_buckets(self):
+        """
+        Refill buckets based on TOTAL elapsed time since last refill.
+        Must be called within lock.
+        """
+        now = time.time()
+        elapsed = now - self.last_refill_time  # Full elapsed time, not capped
+        
+        # Calculate tokens to add for entire elapsed period
+        request_tokens_to_add = elapsed * (self.requests_per_minute / 60.0)
+        token_tokens_to_add = elapsed * (self.tokens_per_minute / 60.0)
+        
+        # Add tokens but cap at burst size
+        self.request_bucket = min(
+            self.request_bucket + request_tokens_to_add, 
+            self.request_burst_size
+        )
+        self.token_bucket = min(
+            self.token_bucket + token_tokens_to_add, 
+            self.token_burst_size
+        )
+        
+        self.last_refill_time = now
+
+    def wait_for_permission(self, tokens_needed):
+        """
+        Wait for permission to make a request with the specified token count.
+        
+        Thread-safe method that blocks until both request and token resources are available.
+        
+        Args:
+            tokens_needed (int): Number of tokens required for the request
+            
+        Raises:
+            ValueError: If tokens_needed exceeds token_burst_size
+        """
+        if tokens_needed > self.token_burst_size:
+            raise ValueError(f"Request requires {tokens_needed} tokens but burst size is only {self.token_burst_size}")
+        
+        start_time = time.time()
+        was_throttled = False
+        limiting_factor = None
+        
+        while True:
+            with self._lock:
+                self._refill_buckets()
+                
+                if self.request_bucket >= 1 and self.token_bucket >= tokens_needed:
+                    # Consume resources
+                    self.request_bucket -= 1
+                    self.token_bucket -= tokens_needed
+                    
+                    # Update stats
+                    self.stats['total_requests'] += 1
+                    self.stats['total_tokens'] += int(tokens_needed)
+                    wait_time = time.time() - start_time
+                    self.stats['total_wait_time'] += wait_time
+                    
+                    # Only increment throttle counters if we actually waited
+                    if was_throttled:
+                        if limiting_factor == 'requests':
+                            self.stats['request_limited_count'] += 1
+                        else:
+                            self.stats['token_limited_count'] += 1
+                    
+                    return
+                
+                # Calculate wait time
+                request_wait = 0 if self.request_bucket >= 1 else \
+                              (1 - self.request_bucket) * 60 / self.requests_per_minute
+                token_wait = 0 if self.token_bucket >= tokens_needed else \
+                            (tokens_needed - self.token_bucket) * 60 / self.tokens_per_minute
+                
+                wait_time = max(request_wait, token_wait)
+                
+                # Track that we're throttling and why (only on first iteration)
+                if not was_throttled and wait_time > 0:
+                    was_throttled = True
+                    limiting_factor = 'requests' if request_wait > token_wait else 'tokens'
+            
+            # Sleep outside the lock
+            if wait_time > 0:
+                time.sleep(wait_time)
+
+    def get_stats(self):
+        """
+        Get current rate limiting statistics in a thread-safe manner.
+        
+        Returns:
+            dict: Copy of current statistics
+        """
+        with self._lock:
+            return self.stats.copy()
+
+
+def estimate_tokens(model_name, text, max_tokens=None):
+    """
+    Estimates total token usage for a request.
+    
+    Args:
+        model_name (str): The model being used
+        text (str): The prompt text
+        max_tokens (int, optional): Maximum completion tokens (if specified)
+    
+    Returns:
+        int: Estimated total tokens (prompt + completion + buffer)
+    """
+    try:
+        # Use cl100k_base encoding for all models
+        encoding = tiktoken.get_encoding("cl100k_base")
+        prompt_tokens = len(encoding.encode(text))
+        
+        # Add completion tokens if specified
+        completion_tokens = max_tokens if max_tokens else 0
+        
+        # Calculate total with 15% safety buffer
+        total_tokens = int((prompt_tokens + completion_tokens) * 1.15)
+        
+        return total_tokens
+        
+    except Exception:
+        # Fallback to character-based estimation with safety buffer
+        prompt_tokens = len(text) // 4
+        completion_tokens = max_tokens if max_tokens else 0
+        return int((prompt_tokens + completion_tokens) * 1.15)
+
+
+class RateLimitedGPT(GPT):
+    """
+    GPT wrapper with dual rate limiting for both requests and tokens.
+    
+    Supports both requests-per-minute and tokens-per-minute limits with configurable
+    burst sizes. Uses the DualRateLimiter for thread-safe concurrent access.
+    """
+
+    def __init__(self, model_name="gpt-4o-mini", temperature=0, max_tokens=8000, provider="openai", key="self", rate_limit_config=None):
+        """
+        Initialize RateLimitedGPT with rate limiting configuration.
+        
+        Args:
+            model_name (str): The model to use
+            temperature (float): Temperature setting for generation
+            max_tokens (int): Maximum tokens for completion
+            provider (str): Either "openai" or "openrouter"
+            key (str): Key selector for API key
+            rate_limit_config (dict, optional): Rate limiting configuration
+        """
+        # Initialize parent GPT class
+        super().__init__(model_name, temperature, max_tokens, provider, key)
+        
+        # Initialize rate limiter with defaults if not provided
+        default_config = {
+            'requests_per_minute': 5000,
+            'tokens_per_minute': 4000000,
+            'request_burst_size': 500
+        }
+        config = rate_limit_config or default_config
+        self.rate_limiter = DualRateLimiter(config)
 
     def __call__(self, prompt, **kwargs):
-        # Wait for token before making API call
-        self._rate_limiter.acquire_token()
-
+        """
+        Make a rate-limited API call.
+        
+        Args:
+            prompt: LangChain prompt template
+            **kwargs: Variables to be formatted into the prompt (e.g., context, question)
+            
+        Returns:
+            dict: Response with 'json' and 'raw_response' keys
+        """
+        # Use the prompt's format method to get the full formatted text
+        try:
+            formatted_prompt_text = prompt.format(**kwargs)
+        except (AttributeError, KeyError, ValueError):
+            # Fallback: convert to string and estimate conservatively
+            prompt_text = str(prompt)
+            kwargs_text = ' '.join(str(v) for v in kwargs.values()) if kwargs else ''
+            formatted_prompt_text = prompt_text + ' ' + kwargs_text
+        
+        # Estimate tokens needed for this request (prompt + max_tokens for completion)
+        tokens_needed = estimate_tokens(self.model_name, formatted_prompt_text, self.max_tokens)
+        
+        # Wait for permission (both request and token limits)
+        self.rate_limiter.wait_for_permission(tokens_needed)
+        
         # Make the actual API call (with existing retry logic)
         return super().__call__(prompt, **kwargs)
+    
+    def get_rate_limit_stats(self):
+        """
+        Get current rate limiting statistics.
+        
+        Returns:
+            dict: Rate limiting statistics
+        """
+        return self.rate_limiter.get_stats()
 
 
 def num_tokens_from_string(string: str, encoding_name: str) -> int:
