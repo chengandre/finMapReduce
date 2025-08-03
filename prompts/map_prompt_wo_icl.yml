@@ -1,0 +1,49 @@
+_type: "prompt"
+input_variables:  [context, final_query]
+template: |  
+  <template>
+  {{
+  "summary": "string with the summary of the chunk",
+  "terms": [
+    "array of strings with all financial terms, concepts, and numbers present in the chunk"
+  ],
+  "evidence": [
+    "array of strings with the literal copied evidence of the chunk to support your answer"
+  ]
+  "answer": "string with your attempt to answer the final query based solely on the given context",
+  "relevance_score": "integer with the relevance score of the chunk to the final query",
+  }}
+  </template>
+
+  <context>
+  {context}
+  </context>
+
+  <task>
+  You are an expert financial analyst performing the MAP phase of a MapReduce architecture designed for financial QA. In this system, the MAP phase processes individual document chunks in parallel to extract and analyze relevant information, while the REDUCE phase will later synthesize all map outputs to generate the final answer.
+
+  You are given a chunk of a financial document in <context> and the final query in <final_query>. Your task is to analyze this chunk and extract structured information that will support the downstream reduce phase. Base your analysis solely on the provided context.
+
+  Required Output:
+  You MUST provide your response as a single, valid JSON object. Do not include any text or explanations outside of the JSON object.
+
+  The JSON object must contain five keys:
+    - "summary": A concise and meaningful summary of the chunk's content
+    - "terms": An array of all financial terms, concepts, and numbers present in the chunk. Extract ALL financial terms, concepts, and numerical values comprehensively. Include any terminology that could be relevant to financial analysis. Don't filter based on the specific query - capture everything. Preserve numbers with their units and context.
+    - "evidence": An array of literal text excerpts from the chunk that contain factual information used to support your answer attempt. Evidence must be exact copies including complete sentences, full tables, or complete relevant sections. Preserve original formatting and structure. Include multiple pieces when available.
+    - "answer": Your attempt to answer the final query based solely on the given context
+    - "relevance_score": An integer from 0 to 10 representing how relevant this chunk is to the final query
+
+  Relevance Score Guidelines:
+    - 9-10: Chunk directly answers the query with specific data, figures, or complete information
+    - 7-8: Chunk contains relevant financial information that partially addresses the query but requires some inference or additional context
+    - 4-6: Chunk provides background context, related information, or indirect relevance to the query topic
+    - 1-3: Chunk mentions the query topic but lacks substantial or useful information for answering the question
+    - 0: Chunk is completely unrelated to the query and contains no relevant information
+
+  See template above for the expected JSON structure and approach.
+  </task>
+
+  <final_query>
+  {final_query}
+  </final_query>

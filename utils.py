@@ -18,6 +18,8 @@ from langchain.schema import Document
 from langchain_openai import ChatOpenAI
 from langchain.text_splitter import CharacterTextSplitter
 from langchain_community.document_loaders import PyPDFLoader, PDFMinerLoader, PyMuPDFLoader, UnstructuredPDFLoader
+from langchain.prompts import load_prompt
+import yaml
 
 load_dotenv()
 
@@ -139,10 +141,10 @@ class GPT:
         try:
             # Try to parse the entire content as JSON first
             return json.loads(content)
-        except json.JSONDecodeError:
+        except Exception as e:
             try:
                 return json5.loads(content)
-            except json.JSONDecodeError:
+            except Exception as e:
                 pass
 
         # Try to extract JSON from code blocks (```json ... ``` or ``` ... ```)
@@ -157,7 +159,7 @@ class GPT:
             for match in matches:
                 try:
                     return json5.loads(match.strip())
-                except json.JSONDecodeError:
+                except Exception as e:
                     continue
 
         # Try to find JSON object patterns in the response
@@ -172,7 +174,7 @@ class GPT:
                 for match in matches:
                     try:
                         return json5.loads(match)
-                    except json.JSONDecodeError:
+                    except Exception as e:
                         continue
 
         except (json.JSONDecodeError, ValueError):
@@ -546,7 +548,7 @@ def _load_pdf_cache(cache_path):
         documents = cache_data.get('documents', [])
         token_count = cache_data.get('token_count', 0)
 
-        # print(f"Loaded PDF parsing results from cache: {cache_path}")
+        print(f"Loaded PDF parsing results from cache: {cache_path}")
         return documents, token_count
         
     except Exception as e:
@@ -667,6 +669,10 @@ def load_pdf_chunk(pdf_file, chunk_size, chunk_overlap, method, force_reparse=Fa
 
     # Handle all other loader methods
     if method == "pypdf":
+        # Try to find the correct PDF file path, similar to marker method
+        # pdf_path = Path(f"{pdf_file}.pdf")
+        # if not pdf_path.exists():
+        
         loader = PyPDFLoader(pdf_file)
     elif method == "pymu":
         loader = PyMuPDFLoader(pdf_file)
@@ -783,3 +789,38 @@ def calculate_accuracy_by_question_type(qa_data):
             stats["accuracy"] = 0
 
     return question_type_stats
+
+
+def load_prompt_set(prompt_set_name=None):
+    """
+    Load all prompts for a prompt set and return loaded prompt objects
+    
+    Args:
+        prompt_set_name (str): Name of the prompt set to load (default, old, last_year, etc.)
+    
+    Returns:
+        dict: Dictionary containing pre-loaded prompt objects with keys:
+              'map_prompt', 'reduce_prompt', 'judge_prompt'
+    """
+    config_path = "prompts/prompt_config.yml"
+    with open(config_path, 'r') as f:
+        config = yaml.safe_load(f)
+    
+    if prompt_set_name is None:
+        prompt_set_name = config.get('default_set', 'default')
+    
+    if prompt_set_name not in config['prompt_sets']:
+        available_sets = list(config['prompt_sets'].keys())
+        raise ValueError(f"Unknown prompt set '{prompt_set_name}'. Available: {available_sets}")
+    
+    prompt_files = config['prompt_sets'][prompt_set_name]
+    
+    # Pre-load all prompt objects
+    loaded_prompts = {
+        'map_prompt': load_prompt(prompt_files['map_prompt']),
+        'reduce_prompt': load_prompt(prompt_files['reduce_prompt']),
+        'judge_prompt': load_prompt(prompt_files['judge_prompt']),
+        'prompt_set_name': prompt_set_name
+    }
+    
+    return loaded_prompts

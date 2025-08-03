@@ -1,0 +1,28 @@
+prompt_sets:
+  default:
+    map_prompt: "prompts/map_prompt.yml"
+    reduce_prompt: "prompts/reduce_prompt.yml"
+    judge_prompt: "prompts/judge_prompt.yml"
+  
+  old:
+    map_prompt: "prompts/map_prompt_old.yml"
+    reduce_prompt: "prompts/reduce_prompt_old.yml"
+    judge_prompt: "prompts/judge_prompt.yml"
+  
+  last_year:
+    map_prompt: "prompts/map_prompt_last_year.yml"
+    reduce_prompt: "prompts/reduce_prompt_last_year.yml"
+    judge_prompt: "prompts/judge_prompt_last_year.yml"
+  
+  standard:
+    map_prompt: "prompts/map_prompt.yml"
+    reduce_prompt: "prompts/reduce_prompt.yml"
+    judge_prompt: "prompts/judge_prompt.yml"
+  
+  wo_icl:
+    map_prompt: "prompts/map_prompt_wo_icl.yml"
+    reduce_prompt: "prompts/reduce_prompt.yml"
+    judge_prompt: "prompts/judge_prompt.yml"
+
+# Default prompt set if none specified
+default_set: "default"

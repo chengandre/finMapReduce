@@ -1,5 +1,5 @@
 from mapreduce_qa import process_financebench_qa
-from utils import GPT, RateLimitedGPT
+from utils import GPT, RateLimitedGPT, load_prompt_set
 import argparse
 
 
@@ -27,8 +27,8 @@ def main():
                       help='Maximum number of QA pairs to process concurrently')
     parser.add_argument('--key', type=str, default=None,
                       help='API key selector: "self" uses SELF_OPENAI_API_KEY, otherwise uses OPENAI_API_KEY')
-    parser.add_argument('--use_old_prompts', action='store_true',
-                      help='Use old prompt versions instead of the default ones')
+    parser.add_argument('--prompt', type=str, default=None,
+                      help='Prompt set to use (default, old, last_year, standard, wo_icl)')
     parser.add_argument('--requests_per_minute', type=int, default=5000,
                       help='Maximum requests per minute for rate limiting')
     parser.add_argument('--tokens_per_minute', type=int, default=4000000,
@@ -46,6 +46,9 @@ def main():
             'request_burst_size': args.request_burst_size
         }
 
+    # Load prompts once at the beginning
+    prompts_dict = load_prompt_set(args.prompt)
+    
     llm = RateLimitedGPT(model_name=args.model_name, temperature=args.temperature, max_tokens=args.max_tokens, provider=args.provider, key=args.key, rate_limit_config=config)
 
     print(f"\nCONFIGURATION:")
@@ -57,7 +60,7 @@ def main():
     print(f"  Max tokens: {args.max_tokens}")
     print(f"  Key: {args.key if args.key else 'default'}")
     print(f"  Path: {args.jsonl_path}")
-    print(f"  Prompt: {'old' if args.use_old_prompts else 'new'}")
+    print(f"  Prompt set: {args.prompt if args.prompt else 'default'}")
     print(f"  Requests per minute: {args.requests_per_minute}")
     print(f"  Tokens per minute: {args.tokens_per_minute}")
     print(f"  Request burst size: {args.request_burst_size}")
@@ -67,11 +70,11 @@ def main():
         jsonl_path=args.jsonl_path,
         model_name=args.model_name,
         llm=llm,
+        prompts_dict=prompts_dict,
         num_samples=args.num_samples,
         chunk_size=args.chunk_size,
         chunk_overlap=args.chunk_overlap,
         max_concurrent_qa=args.max_concurrent_qa,
-        use_old_prompts=args.use_old_prompts,
         pdf_parser=args.pdf_parser
     )
 
