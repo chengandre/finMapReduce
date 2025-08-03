@@ -224,7 +224,7 @@ class TokenBucketRateLimiter:
 class DualRateLimiter:
     """
     Thread-safe rate limiter managing both request and token limits using token bucket algorithm.
-    
+
     Enforces both requests-per-minute and tokens-per-minute limits with configurable burst sizes.
     Designed for development and testing with multiple concurrent API calls.
     """
@@ -232,7 +232,7 @@ class DualRateLimiter:
     def __init__(self, config):
         """
         Initialize the dual rate limiter.
-        
+
         Args:
             config (dict): Configuration with keys:
                 - requests_per_minute: Maximum requests per minute
@@ -244,17 +244,17 @@ class DualRateLimiter:
         self.requests_per_minute = config['requests_per_minute']
         self.tokens_per_minute = config['tokens_per_minute']
         self.request_burst_size = config.get('request_burst_size', 10)
-        self.token_burst_size = config.get('token_burst_size', 
+        self.token_burst_size = config.get('token_burst_size',
                                           int(self.tokens_per_minute / 60 * 2))  # 2 seconds of tokens
-        
+
         # Bucket state
         self.request_bucket = float(self.request_burst_size)
         self.token_bucket = float(self.token_burst_size)
         self.last_refill_time = time.time()
-        
+
         # Thread safety
         self._lock = threading.Lock()
-        
+
         # Metrics
         self.stats = {
             'total_requests': 0,
@@ -271,79 +271,79 @@ class DualRateLimiter:
         """
         now = time.time()
         elapsed = now - self.last_refill_time  # Full elapsed time, not capped
-        
+
         # Calculate tokens to add for entire elapsed period
         request_tokens_to_add = elapsed * (self.requests_per_minute / 60.0)
         token_tokens_to_add = elapsed * (self.tokens_per_minute / 60.0)
-        
+
         # Add tokens but cap at burst size
         self.request_bucket = min(
-            self.request_bucket + request_tokens_to_add, 
+            self.request_bucket + request_tokens_to_add,
             self.request_burst_size
         )
         self.token_bucket = min(
-            self.token_bucket + token_tokens_to_add, 
+            self.token_bucket + token_tokens_to_add,
             self.token_burst_size
         )
-        
+
         self.last_refill_time = now
 
     def wait_for_permission(self, tokens_needed):
         """
         Wait for permission to make a request with the specified token count.
-        
+
         Thread-safe method that blocks until both request and token resources are available.
-        
+
         Args:
             tokens_needed (int): Number of tokens required for the request
-            
+
         Raises:
             ValueError: If tokens_needed exceeds token_burst_size
         """
         if tokens_needed > self.token_burst_size:
             raise ValueError(f"Request requires {tokens_needed} tokens but burst size is only {self.token_burst_size}")
-        
+
         start_time = time.time()
         was_throttled = False
         limiting_factor = None
-        
+
         while True:
             with self._lock:
                 self._refill_buckets()
-                
+
                 if self.request_bucket >= 1 and self.token_bucket >= tokens_needed:
                     # Consume resources
                     self.request_bucket -= 1
                     self.token_bucket -= tokens_needed
-                    
+
                     # Update stats
                     self.stats['total_requests'] += 1
                     self.stats['total_tokens'] += int(tokens_needed)
                     wait_time = time.time() - start_time
                     self.stats['total_wait_time'] += wait_time
-                    
+
                     # Only increment throttle counters if we actually waited
                     if was_throttled:
                         if limiting_factor == 'requests':
                             self.stats['request_limited_count'] += 1
                         else:
                             self.stats['token_limited_count'] += 1
-                    
+
                     return
-                
+
                 # Calculate wait time
                 request_wait = 0 if self.request_bucket >= 1 else \
                               (1 - self.request_bucket) * 60 / self.requests_per_minute
                 token_wait = 0 if self.token_bucket >= tokens_needed else \
                             (tokens_needed - self.token_bucket) * 60 / self.tokens_per_minute
-                
+
                 wait_time = max(request_wait, token_wait)
-                
+
                 # Track that we're throttling and why (only on first iteration)
                 if not was_throttled and wait_time > 0:
                     was_throttled = True
                     limiting_factor = 'requests' if request_wait > token_wait else 'tokens'
-            
+
             # Sleep outside the lock
             if wait_time > 0:
                 time.sleep(wait_time)
@@ -351,7 +351,7 @@ class DualRateLimiter:
     def get_stats(self):
         """
         Get current rate limiting statistics in a thread-safe manner.
-        
+
         Returns:
             dict: Copy of current statistics
         """
@@ -362,12 +362,12 @@ class DualRateLimiter:
 def estimate_tokens(model_name, text, max_tokens=None):
     """
     Estimates total token usage for a request.
-    
+
     Args:
         model_name (str): The model being used
         text (str): The prompt text
         max_tokens (int, optional): Maximum completion tokens (if specified)
-    
+
     Returns:
         int: Estimated total tokens (prompt + completion + buffer)
     """
@@ -375,15 +375,15 @@ def estimate_tokens(model_name, text, max_tokens=None):
         # Use cl100k_base encoding for all models
         encoding = tiktoken.get_encoding("cl100k_base")
         prompt_tokens = len(encoding.encode(text))
-        
+
         # Add completion tokens if specified
         completion_tokens = max_tokens if max_tokens else 0
-        
+
         # Calculate total with 15% safety buffer
         total_tokens = int((prompt_tokens + completion_tokens) * 1.15)
-        
+
         return total_tokens
-        
+
     except Exception:
         # Fallback to character-based estimation with safety buffer
         prompt_tokens = len(text) // 4
@@ -394,15 +394,15 @@ def estimate_tokens(model_name, text, max_tokens=None):
 class RateLimitedGPT(GPT):
     """
     GPT wrapper with dual rate limiting for both requests and tokens.
-    
+
     Supports both requests-per-minute and tokens-per-minute limits with configurable
     burst sizes. Uses the DualRateLimiter for thread-safe concurrent access.
     """
 
-    def __init__(self, model_name="gpt-4o-mini", temperature=0, max_tokens=8000, provider="openai", key="self", rate_limit_config=None):
+    def __init__(self, model_name="gpt-4o-mini", temperature=0.0, max_tokens=8000, provider="openai", key="self", rate_limit_config=None):
         """
         Initialize RateLimitedGPT with rate limiting configuration.
-        
+
         Args:
             model_name (str): The model to use
             temperature (float): Temperature setting for generation
@@ -413,7 +413,7 @@ class RateLimitedGPT(GPT):
         """
         # Initialize parent GPT class
         super().__init__(model_name, temperature, max_tokens, provider, key)
-        
+
         # Initialize rate limiter with defaults if not provided
         default_config = {
             'requests_per_minute': 5000,
@@ -426,11 +426,11 @@ class RateLimitedGPT(GPT):
     def __call__(self, prompt, **kwargs):
         """
         Make a rate-limited API call.
-        
+
         Args:
             prompt: LangChain prompt template
             **kwargs: Variables to be formatted into the prompt (e.g., context, question)
-            
+
         Returns:
             dict: Response with 'json' and 'raw_response' keys
         """
@@ -442,20 +442,20 @@ class RateLimitedGPT(GPT):
             prompt_text = str(prompt)
             kwargs_text = ' '.join(str(v) for v in kwargs.values()) if kwargs else ''
             formatted_prompt_text = prompt_text + ' ' + kwargs_text
-        
+
         # Estimate tokens needed for this request (prompt + max_tokens for completion)
         tokens_needed = estimate_tokens(self.model_name, formatted_prompt_text, self.max_tokens)
-        
+
         # Wait for permission (both request and token limits)
         self.rate_limiter.wait_for_permission(tokens_needed)
-        
+
         # Make the actual API call (with existing retry logic)
         return super().__call__(prompt, **kwargs)
-    
+
     def get_rate_limit_stats(self):
         """
         Get current rate limiting statistics.
-        
+
         Returns:
             dict: Rate limiting statistics
         """
@@ -472,41 +472,41 @@ def num_tokens_from_string(string: str, encoding_name: str) -> int:
 def _get_pdf_cache_path(pdf_file, method, chunk_size, chunk_overlap):
     """
     Generate a cache file path for PDF parsing results based on file content and parameters.
-    
+
     Args:
         pdf_file (str): Path to the PDF file
         method (str): PDF parsing method used
         chunk_size (int): Chunk size parameter
         chunk_overlap (int): Chunk overlap parameter
-    
+
     Returns:
         Path: Path to the cache file
     """
     # Create a hash of the file content + parameters for cache key
     pdf_path = Path(pdf_file)
-    
+
     # Get file modification time and size for cache validity
     try:
         stat = pdf_path.stat()
         file_info = f"{stat.st_mtime}_{stat.st_size}"
     except (OSError, FileNotFoundError):
         file_info = "unknown"
-    
+
     # Create hash of filename, method, parameters, and file info
     cache_key = f"{pdf_path.name}_{method}_{chunk_size}_{chunk_overlap}_{file_info}"
     cache_hash = hashlib.md5(cache_key.encode()).hexdigest()
-    
+
     # Create cache directory structure
     cache_dir = Path("pdf_cache") / method
     cache_dir.mkdir(parents=True, exist_ok=True)
-    
+
     return cache_dir / f"{pdf_path.stem}_{cache_hash}.pkl"
 
 
 def _save_pdf_cache(cache_path, documents, token_count):
     """
     Save PDF parsing results to cache.
-    
+
     Args:
         cache_path (Path): Path to save the cache file
         documents (list): List of Document objects
@@ -518,12 +518,12 @@ def _save_pdf_cache(cache_path, documents, token_count):
             'token_count': token_count,
             'timestamp': time.time()
         }
-        
+
         with open(cache_path, 'wb') as f:
             pickle.dump(cache_data, f)
-        
+
         # print(f"Saved PDF parsing results to cache: {cache_path}")
-        
+
     except Exception as e:
         print(f"Warning: Failed to save PDF cache: {e}")
 
@@ -531,26 +531,26 @@ def _save_pdf_cache(cache_path, documents, token_count):
 def _load_pdf_cache(cache_path):
     """
     Load PDF parsing results from cache.
-    
+
     Args:
         cache_path (Path): Path to the cache file
-    
+
     Returns:
         tuple: (documents, token_count) or (None, None) if cache invalid/missing
     """
     try:
         if not cache_path.exists():
             return None, None
-        
+
         with open(cache_path, 'rb') as f:
             cache_data = pickle.load(f)
-        
+
         documents = cache_data.get('documents', [])
         token_count = cache_data.get('token_count', 0)
 
         print(f"Loaded PDF parsing results from cache: {cache_path}")
         return documents, token_count
-        
+
     except Exception as e:
         print(f"Warning: Failed to load PDF cache: {e}")
         return None, None
@@ -663,7 +663,7 @@ def load_pdf_chunk(pdf_file, chunk_size, chunk_overlap, method, force_reparse=Fa
     if not force_reparse:
         cache_path = _get_pdf_cache_path(pdf_file, method, chunk_size, chunk_overlap)
         cached_documents, cached_token_count = _load_pdf_cache(cache_path)
-        
+
         if cached_documents is not None:
             return cached_documents, cached_token_count
 
@@ -672,7 +672,7 @@ def load_pdf_chunk(pdf_file, chunk_size, chunk_overlap, method, force_reparse=Fa
         # Try to find the correct PDF file path, similar to marker method
         # pdf_path = Path(f"{pdf_file}.pdf")
         # if not pdf_path.exists():
-        
+
         loader = PyPDFLoader(pdf_file)
     elif method == "pymu":
         loader = PyMuPDFLoader(pdf_file)
@@ -683,12 +683,12 @@ def load_pdf_chunk(pdf_file, chunk_size, chunk_overlap, method, force_reparse=Fa
 
     documents = loader.load()
     split_documents, token_count = _process_documents(documents, chunk_size, chunk_overlap, use_tiktoken=True)
-    
+
     # Save to cache for future use (except for marker method which has its own caching)
     if method != "marker":
         cache_path = _get_pdf_cache_path(pdf_file, method, chunk_size, chunk_overlap)
         _save_pdf_cache(cache_path, split_documents, token_count)
-    
+
     return split_documents, token_count
 
 
@@ -794,10 +794,10 @@ def calculate_accuracy_by_question_type(qa_data):
 def load_prompt_set(prompt_set_name=None):
     """
     Load all prompts for a prompt set and return loaded prompt objects
-    
+
     Args:
         prompt_set_name (str): Name of the prompt set to load (default, old, last_year, etc.)
-    
+
     Returns:
         dict: Dictionary containing pre-loaded prompt objects with keys:
               'map_prompt', 'reduce_prompt', 'judge_prompt'
@@ -805,16 +805,16 @@ def load_prompt_set(prompt_set_name=None):
     config_path = "prompts/prompt_config.yml"
     with open(config_path, 'r') as f:
         config = yaml.safe_load(f)
-    
+
     if prompt_set_name is None:
         prompt_set_name = config.get('default_set', 'default')
-    
+
     if prompt_set_name not in config['prompt_sets']:
         available_sets = list(config['prompt_sets'].keys())
         raise ValueError(f"Unknown prompt set '{prompt_set_name}'. Available: {available_sets}")
-    
+
     prompt_files = config['prompt_sets'][prompt_set_name]
-    
+
     # Pre-load all prompt objects
     loaded_prompts = {
         'map_prompt': load_prompt(prompt_files['map_prompt']),
@@ -822,5 +822,5 @@ def load_prompt_set(prompt_set_name=None):
         'judge_prompt': load_prompt(prompt_files['judge_prompt']),
         'prompt_set_name': prompt_set_name
     }
-    
+
     return loaded_prompts

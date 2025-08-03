@@ -1,6 +1,6 @@
 _type: "prompt"
 input_variables:  [context, final_query]
-template: |  
+template: |
   <template>
   {{
   "summary": "string with the summary of the chunk",

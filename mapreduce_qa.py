@@ -596,7 +596,7 @@ def process_single_finqa(qa_pair, llm, prompts_dict, doc_dir, chunk_size=36000, 
     return qa_pair
 
 
-def process_financebench_qa(jsonl_path, model_name, llm, prompts_dict, num_samples=None, chunk_size=36000, chunk_overlap=1000, max_concurrent_qa=3, pdf_parser="marker"):
+def process_financebench_qa(jsonl_path, model_name, llm, prompts_dict, num_samples=None, chunk_size=36000, chunk_overlap=1000, max_concurrent_qa=3, pdf_parser="marker", judge=None):
     """
     Process QA from financebench with parallel processing of QA pairs.
 
@@ -604,12 +604,13 @@ def process_financebench_qa(jsonl_path, model_name, llm, prompts_dict, num_sampl
         jsonl_path (str): Path to financebench jsonl file
         model_name (str): Name of the LLM model
         llm: LLM instance to use
+        prompts_dict (dict): Pre-loaded prompt objects
         num_samples (int): Number of samples to process
         chunk_size (int): Size of each document chunk
         chunk_overlap (int): Overlap between document chunks
         max_concurrent_qa (int): Maximum number of QA pairs to process concurrently
-        use_old_prompts (bool): Whether to use old prompt versions
         pdf_parser (str): PDF parsing method to use (default: "marker")
+        judge: LLM instance to use for judging (if None, uses llm)
 
     Returns:
         dict: Results containing model answers, golden answers, and evaluation results
@@ -655,13 +656,14 @@ def process_financebench_qa(jsonl_path, model_name, llm, prompts_dict, num_sampl
 
     # Evaluate using LLM judge
     # print("Evaluating answers using LLM judge...")
-    evaluation_results = evaluate_with_llm_judge(llm, qa_data, prompts_dict)
+    judge_llm = judge if judge is not None else llm
+    evaluation_results = evaluate_with_llm_judge(judge_llm, qa_data, prompts_dict)
 
     # Save results to file
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     results_dir = "financebench_results"
     os.makedirs(results_dir, exist_ok=True)
-    
+
     # Create detailed filename with configuration
     prompt_name = prompts_dict.get('prompt_set_name', 'unknown')
     dataset_name = "financebench"
@@ -684,7 +686,7 @@ def process_financebench_qa(jsonl_path, model_name, llm, prompts_dict, num_sampl
             "max_concurrent_qa": max_concurrent_qa,
             "approach": "MapReduce"
         },
-        
+
         # Execution details
         "execution_time": datetime.now().isoformat(),
         "time_taken": time.time() - t1,
@@ -732,7 +734,7 @@ def process_financebench_qa(jsonl_path, model_name, llm, prompts_dict, num_sampl
     return results
 
 
-def process_finqa_qa(json_path, doc_dir, model_name, llm, prompts_dict, num_samples=None, chunk_size=36000, chunk_overlap=1000, max_concurrent_qa=20):
+def process_finqa_qa(json_path, doc_dir, model_name, llm, prompts_dict, num_samples=None, chunk_size=36000, chunk_overlap=1000, max_concurrent_qa=20, judge=None):
     """
     Process QA from FinQA with parallel processing of QA pairs.
 
@@ -784,13 +786,14 @@ def process_finqa_qa(json_path, doc_dir, model_name, llm, prompts_dict, num_samp
 
     # Evaluate using LLM judge
     # print("Evaluating answers using LLM judge...")
-    evaluation_results = evaluate_with_llm_judge(llm, qa_data, prompts_dict)
+    judge_llm = judge if judge is not None else llm
+    evaluation_results = evaluate_with_llm_judge(judge_llm, qa_data, prompts_dict)
 
     # Save results to file
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     results_dir = "finqa_results"
     os.makedirs(results_dir, exist_ok=True)
-    
+
     # Create detailed filename with configuration
     prompt_name = prompts_dict.get('prompt_set_name', 'unknown')
     dataset_name = "finqa"
@@ -812,7 +815,7 @@ def process_finqa_qa(json_path, doc_dir, model_name, llm, prompts_dict, num_samp
             "max_concurrent_qa": max_concurrent_qa,
             "approach": "MapReduce"
         },
-        
+
         # Execution details
         "execution_time": datetime.now().isoformat(),
         "time_taken": time.time() - t1,

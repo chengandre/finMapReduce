@@ -37,7 +37,7 @@ def main():
                       help='Maximum tokens per minute for rate limiting')
     parser.add_argument('--request_burst_size', type=int, default=500,
                       help='Maximum burst size for requests')
-    
+
     args = parser.parse_args()
 
     config = {
@@ -48,7 +48,7 @@ def main():
 
     # Load prompts once at the beginning
     prompts_dict = load_prompt_set(args.prompt)
-    
+
     print(f"Loading model: {args.model_name}")
     llm = RateLimitedGPT(model_name=args.model_name, temperature=args.temperature, max_tokens=args.max_tokens, provider=args.provider, key=args.key, rate_limit_config=config)
 

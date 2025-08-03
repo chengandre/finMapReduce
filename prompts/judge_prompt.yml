@@ -35,7 +35,7 @@ template: |
     </query>
     <llm_evidence>
     From the consolidated income statement:
-    
+
     | Revenue Stream | Q4 2023 ($M) |
     |----------------|---------------|
     | Product Sales  | 245.7         |
@@ -69,7 +69,7 @@ template: |
     </query>
     <llm_evidence>
     Annual financial summary shows:
-    - Total Revenue: $1,425.8 million  
+    - Total Revenue: $1,425.8 million
     - Cost of Goods Sold: $856.2 million
     - Gross Profit: $569.6 million
     </llm_evidence>
@@ -99,7 +99,7 @@ template: |
     </query>
     <llm_evidence>
     Operating expenses breakdown (YoY change):
-    
+
     | Expense Category | 2023 ($M) | 2022 ($M) | Change ($M) | Change (%) |
     |------------------|-----------|-----------|-------------|------------|
     | R&D              | 125.4     | 89.7      | +35.7       | +39.8%     |
@@ -164,7 +164,7 @@ template: |
     <llm_evidence>
     Q3 2023 financial results excerpt:
     - Total Revenue: $267.4 million (+12% YoY)
-    - Domestic Revenue: $198.7 million  
+    - Domestic Revenue: $198.7 million
     - International Revenue: $68.7 million
     </llm_evidence>
     <llm_reasoning>

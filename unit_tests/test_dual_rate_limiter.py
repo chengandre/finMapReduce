@@ -21,9 +21,9 @@ class TestDualRateLimiter:
             'tokens_per_minute': 150000,
             'request_burst_size': 20
         }
-        
+
         limiter = DualRateLimiter(config)
-        
+
         assert limiter.requests_per_minute == 120
         assert limiter.tokens_per_minute == 150000
         assert limiter.request_burst_size == 20
@@ -37,9 +37,9 @@ class TestDualRateLimiter:
             'requests_per_minute': 60,
             'tokens_per_minute': 90000
         }
-        
+
         limiter = DualRateLimiter(config)
-        
+
         expected_token_burst = int(90000 / 60 * 2)  # 2 seconds worth of tokens
         assert limiter.token_burst_size == expected_token_burst
         assert limiter.request_burst_size == 10  # default
@@ -51,9 +51,9 @@ class TestDualRateLimiter:
             'tokens_per_minute': 90000,
             'token_burst_size': 5000
         }
-        
+
         limiter = DualRateLimiter(config)
-        
+
         assert limiter.token_burst_size == 5000
 
     def test_instant_permission_with_available_resources(self):
@@ -64,16 +64,16 @@ class TestDualRateLimiter:
             'request_burst_size': 5,
             'token_burst_size': 100
         }
-        
+
         limiter = DualRateLimiter(config)
-        
+
         start_time = time.time()
         limiter.wait_for_permission(50)
         end_time = time.time()
-        
+
         # Should be instant (less than 100ms)
         assert (end_time - start_time) < 0.1
-        
+
         # Check that resources were consumed
         assert limiter.request_bucket == 4.0  # 5 - 1
         assert limiter.token_bucket == 50.0   # 100 - 50
@@ -86,22 +86,22 @@ class TestDualRateLimiter:
             'request_burst_size': 2,
             'token_burst_size': 1000
         }
-        
+
         limiter = DualRateLimiter(config)
-        
+
         # First two should be instant (burst)
         start_time = time.time()
         limiter.wait_for_permission(10)
         limiter.wait_for_permission(10)
         burst_time = time.time() - start_time
-        
+
         assert burst_time < 0.1  # Should be instant
-        
+
         # Third should wait ~1 second
         start_time = time.time()
         limiter.wait_for_permission(10)
         wait_time = time.time() - start_time
-        
+
         assert 0.9 < wait_time < 1.1  # Should wait approximately 1 second
 
     def test_token_rate_limiting(self):
@@ -112,21 +112,21 @@ class TestDualRateLimiter:
             'request_burst_size': 10,
             'token_burst_size': 2
         }
-        
+
         limiter = DualRateLimiter(config)
-        
+
         # First request should be instant
         start_time = time.time()
         limiter.wait_for_permission(2)  # Use all burst tokens
         burst_time = time.time() - start_time
-        
+
         assert burst_time < 0.1  # Should be instant
-        
+
         # Second should wait ~2 seconds (need 2 tokens at 1/second)
         start_time = time.time()
         limiter.wait_for_permission(2)
         wait_time = time.time() - start_time
-        
+
         assert 1.8 < wait_time < 2.2  # Should wait approximately 2 seconds
 
     def test_concurrent_access(self):
@@ -136,29 +136,29 @@ class TestDualRateLimiter:
             'tokens_per_minute': 6000,  # 100 per second
             'request_burst_size': 2
         }
-        
+
         limiter = DualRateLimiter(config)
         results = []
-        
+
         def make_request(tokens):
             start = time.time()
             limiter.wait_for_permission(tokens)
             end = time.time()
             results.append(end - start)
-        
+
         # Launch 5 threads
         threads = []
         for _ in range(5):
             t = threading.Thread(target=make_request, args=(50,))
             threads.append(t)
             t.start()
-        
+
         for t in threads:
             t.join()
-        
+
         # Sort results to analyze timing
         results.sort()
-        
+
         # First 2 should be instant (burst), others should wait
         assert results[0] < 0.1
         assert results[1] < 0.1
@@ -171,15 +171,15 @@ class TestDualRateLimiter:
             'tokens_per_minute': 6000,
             'request_burst_size': 5
         }
-        
+
         limiter = DualRateLimiter(config)
-        
+
         # Make several requests
         limiter.wait_for_permission(100)
         limiter.wait_for_permission(200)
-        
+
         stats = limiter.get_stats()
-        
+
         assert stats['total_requests'] == 2
         assert stats['total_tokens'] == 300
         assert stats['total_wait_time'] >= 0
@@ -193,9 +193,9 @@ class TestDualRateLimiter:
             'tokens_per_minute': 6000,
             'token_burst_size': 100
         }
-        
+
         limiter = DualRateLimiter(config)
-        
+
         with pytest.raises(ValueError, match="Request requires 150 tokens but burst size is only 100"):
             limiter.wait_for_permission(150)
 
@@ -207,18 +207,18 @@ class TestDualRateLimiter:
             'request_burst_size': 1,
             'token_burst_size': 1
         }
-        
+
         limiter = DualRateLimiter(config)
-        
+
         # Consume all resources
         limiter.wait_for_permission(1)
-        
+
         # Check that buckets are nearly empty (allowing for small timing differences)
         with limiter._lock:
             limiter._refill_buckets()
             assert limiter.request_bucket < 0.01  # Nearly empty
             assert limiter.token_bucket < 0.01    # Nearly empty
-        
+
         # Wait 1 second and check refill
         time.sleep(1.1)
         with limiter._lock:
@@ -233,31 +233,31 @@ class TestDualRateLimiter:
             'tokens_per_minute': 60000,
             'request_burst_size': 100
         }
-        
+
         limiter = DualRateLimiter(config)
-        
+
         def make_requests():
             for _ in range(10):
                 limiter.wait_for_permission(10)
-        
+
         def read_stats():
             for _ in range(20):
                 stats = limiter.get_stats()
                 assert isinstance(stats, dict)
                 time.sleep(0.01)
-        
+
         # Run concurrent operations
         threads = []
         for _ in range(3):
             threads.append(threading.Thread(target=make_requests))
         for _ in range(2):
             threads.append(threading.Thread(target=read_stats))
-        
+
         for t in threads:
             t.start()
         for t in threads:
             t.join()
-        
+
         # Verify final stats
         final_stats = limiter.get_stats()
         assert final_stats['total_requests'] == 30
@@ -270,13 +270,13 @@ class TestTokenEstimator:
     def test_basic_token_estimation(self):
         """Test basic token estimation functionality"""
         text = "Hello, how are you today?"
-        
+
         tokens = estimate_tokens("gpt-4", text)
-        
+
         # Should return a positive integer
         assert isinstance(tokens, int)
         assert tokens > 0
-        
+
         # Should include 15% buffer
         # Rough check: short text should be < 50 tokens with buffer
         assert tokens < 50
@@ -285,9 +285,9 @@ class TestTokenEstimator:
         """Test token estimation with max_tokens specified"""
         text = "Short text"
         max_tokens = 1000
-        
+
         tokens = estimate_tokens("gpt-4", text, max_tokens)
-        
+
         # Should include completion tokens
         assert tokens > max_tokens  # Should be prompt + completion + buffer
 
@@ -295,19 +295,19 @@ class TestTokenEstimator:
         """Test estimation with longer text"""
         # Create a longer text (approximately 100 words)
         text = " ".join(["word"] * 100)
-        
+
         tokens = estimate_tokens("gpt-3.5-turbo", text)
-        
+
         # Should scale with text length
         assert tokens > 50  # Should be significantly more than short text
 
     def test_fallback_estimation(self):
         """Test fallback estimation when tiktoken fails"""
         text = "Test text for fallback"
-        
+
         with patch('tiktoken.get_encoding', side_effect=Exception("Mock error")):
             tokens = estimate_tokens("custom-model", text)
-        
+
         # Should still return a positive integer
         assert isinstance(tokens, int)
         assert tokens > 0
@@ -315,7 +315,7 @@ class TestTokenEstimator:
     def test_empty_text(self):
         """Test estimation with empty text"""
         tokens = estimate_tokens("gpt-4", "")
-        
+
         # Should handle empty text gracefully
         assert isinstance(tokens, int)
         assert tokens >= 0
@@ -323,9 +323,9 @@ class TestTokenEstimator:
     def test_different_models(self):
         """Test that estimation works with different model names"""
         text = "Test text"
-        
+
         models = ["gpt-4", "gpt-3.5-turbo", "custom-model", "claude-3"]
-        
+
         for model in models:
             tokens = estimate_tokens(model, text)
             assert isinstance(tokens, int)

@@ -37,7 +37,7 @@ def main():
                       help='Maximum burst size for requests')
     parser.add_argument('--pdf_parser', type=str, default="marker",
                       help='PDF parsing method to use (default: marker)')
-    
+
     args = parser.parse_args()
 
     config = {
@@ -46,10 +46,21 @@ def main():
             'request_burst_size': args.request_burst_size
         }
 
+    judge_config = {
+            'requests_per_minute': 10,
+            'tokens_per_minute': 4000000,
+            'request_burst_size': 2
+    }
+
     # Load prompts once at the beginning
     prompts_dict = load_prompt_set(args.prompt)
-    
+
     llm = RateLimitedGPT(model_name=args.model_name, temperature=args.temperature, max_tokens=args.max_tokens, provider=args.provider, key=args.key, rate_limit_config=config)
+    judge = RateLimitedGPT(model_name="deepseek/deepseek-r1-0528:free",
+                           temperature=0.0,
+                           max_tokens=4096,
+                           provider="openrouter",
+                           rate_limit_config=judge_config)
 
     print(f"\nCONFIGURATION:")
     print(f"  Model name: {args.model_name}")
@@ -75,7 +86,8 @@ def main():
         chunk_size=args.chunk_size,
         chunk_overlap=args.chunk_overlap,
         max_concurrent_qa=args.max_concurrent_qa,
-        pdf_parser=args.pdf_parser
+        pdf_parser=args.pdf_parser,
+        judge=judge
     )
 
     # Print summary results
