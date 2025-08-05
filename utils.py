@@ -51,6 +51,8 @@ class GPT:
         else:  # default to openai
             if key == "self":
                 api_key = SecretStr(os.getenv("SELF_OPENAI_API_KEY", ""))
+            elif key == "elm":
+                api_key = SecretStr(os.getenv("ELM_OPENAI_API_KEY", ""))
             else:
                 api_key = SecretStr(os.getenv("OPENAI_API_KEY", ""))
             base_url = None
@@ -67,6 +69,10 @@ class GPT:
         # Create directory for saving prompts if it doesn't exist
         self.prompts_dir = Path("prompts_log")
         self.prompts_dir.mkdir(exist_ok=True)
+
+    def get_model_name(self):
+        """Get the model name."""
+        return self.model_name
 
     def __call__(self, prompt, **kwargs):
         max_retries = 50
@@ -391,6 +397,183 @@ def estimate_tokens(model_name, text, max_tokens=None):
         return int((prompt_tokens + completion_tokens) * 1.15)
 
 
+class RetryLLM:
+    """
+    LLM wrapper with retry mechanism but no JSON parsing.
+
+    Provides the same retry logic as GPT class but returns raw responses
+    without attempting to parse JSON. Useful when you want direct access
+    to the LLM response but still need robust error handling.
+    """
+
+    def __init__(self, model_name, temperature, max_tokens, provider="openrouter", key=None):
+        """
+        Initialize RetryLLM wrapper.
+
+        Args:
+            model_name (str): The model to use
+            temperature (float): Temperature setting for generation
+            max_tokens (int): Maximum tokens for completion
+            provider (str): Either "openai" or "openrouter"
+            key (str): Key selector - if "self" and provider is not "openrouter", uses SELF_OPENAI_API_KEY, else OPENAI_API_KEY
+        """
+        self.model_name = model_name
+        self.temperature = temperature
+        self.max_tokens = max_tokens
+        self.provider = provider.lower()
+        self.key = key
+
+        # Configure based on provider
+        if provider == "openrouter":
+            api_key = SecretStr(os.getenv("OPENROUTER_API_KEY", ""))
+            base_url = "https://openrouter.ai/api/v1"
+        else:  # default to openai
+            if key == "self":
+                api_key = SecretStr(os.getenv("SELF_OPENAI_API_KEY", ""))
+            elif key == "elm":
+                api_key = SecretStr(os.getenv("ELM_OPENAI_API_KEY", ""))
+            else:
+                api_key = SecretStr(os.getenv("OPENAI_API_KEY", ""))
+            base_url = None
+
+        self.llm = ChatOpenAI(
+            model=model_name,
+            api_key=api_key,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            base_url=base_url,
+            max_retries=50
+        )
+
+        # Create directory for saving prompts if it doesn't exist
+        self.prompts_dir = Path("prompts_log")
+        self.prompts_dir.mkdir(exist_ok=True)
+
+    def invoke(self, prompt_text):
+        """
+        Invoke the LLM with retry logic but no JSON parsing.
+
+        Args:
+            prompt_text (str): The formatted prompt text to send to the LLM
+
+        Returns:
+            ChatOpenAI response object (with .content and .usage_metadata attributes)
+        """
+        max_retries = 50
+        base_delay = 2
+
+        # Generate unique ID for this prompt
+        prompt_id = str(uuid.uuid4())
+        prompt_file = self.prompts_dir / f"prompt_{prompt_id}.json"
+
+        # Save the prompt to file
+        prompt_data = {
+            "prompt_text": prompt_text,
+            "model": self.model_name,
+            "timestamp": time.time()
+        }
+
+        with open(prompt_file, "w", encoding="utf-8") as f:
+            json.dump(prompt_data, f, indent=2)
+
+        for attempt in range(max_retries):
+            try:
+                response = self.llm.invoke(prompt_text)
+
+                # Success - delete the prompt file
+                if prompt_file.exists():
+                    prompt_file.unlink()
+
+                return response
+
+            except Exception as e:
+                error_str = str(e)
+
+                retryable_errors = [
+                    "Internal Server Error",
+                    "500",
+                    "502",
+                    "503",
+                    "504",
+                    "timeout",
+                    "connection",
+                    "rate limit",
+                    "too many requests"
+                ]
+
+                is_retryable = any(error_type.lower() in error_str.lower() for error_type in retryable_errors)
+                is_retryable = True
+
+                if not is_retryable or attempt == max_retries - 1:
+                    # Keep the prompt file for analysis (don't delete it)
+                    raise e
+
+                delay = min(base_delay * (2 ** attempt), 60)
+                print(f"Error (attempt {attempt + 1}/{max_retries}): {error_str}")
+                time.sleep(delay)
+
+
+class RateLimitedRetryLLM(RetryLLM):
+    """
+    LLM wrapper with both rate limiting and retry mechanism but no JSON parsing.
+
+    Combines the retry logic from RetryLLM with rate limiting from DualRateLimiter.
+    Returns raw responses without attempting to parse JSON.
+    """
+
+    def __init__(self, model_name="gpt-4o-mini", temperature=0.0, max_tokens=8000, provider="openai", key="self", rate_limit_config=None):
+        """
+        Initialize RateLimitedRetryLLM with rate limiting configuration.
+
+        Args:
+            model_name (str): The model to use
+            temperature (float): Temperature setting for generation
+            max_tokens (int): Maximum tokens for completion
+            provider (str): Either "openai" or "openrouter"
+            key (str): Key selector for API key
+            rate_limit_config (dict, optional): Rate limiting configuration
+        """
+        # Initialize parent RetryLLM class
+        super().__init__(model_name, temperature, max_tokens, provider, key)
+
+        # Initialize rate limiter with defaults if not provided
+        default_config = {
+            'requests_per_minute': 5000,
+            'tokens_per_minute': 4000000,
+            'request_burst_size': 500
+        }
+        config = rate_limit_config or default_config
+        self.rate_limiter = DualRateLimiter(config)
+
+    def invoke(self, prompt_text):
+        """
+        Make a rate-limited API call with retry logic but no JSON parsing.
+
+        Args:
+            prompt_text (str): The formatted prompt text to send to the LLM
+
+        Returns:
+            ChatOpenAI response object (with .content and .usage_metadata attributes)
+        """
+        # Estimate tokens needed for this request (prompt + max_tokens for completion)
+        tokens_needed = estimate_tokens(self.model_name, prompt_text, self.max_tokens)
+
+        # Wait for permission (both request and token limits)
+        self.rate_limiter.wait_for_permission(tokens_needed)
+
+        # Make the actual API call (with existing retry logic from parent)
+        return super().invoke(prompt_text)
+
+    def get_rate_limit_stats(self):
+        """
+        Get current rate limiting statistics.
+
+        Returns:
+            dict: Rate limiting statistics
+        """
+        return self.rate_limiter.get_stats()
+
+
 class RateLimitedGPT(GPT):
     """
     GPT wrapper with dual rate limiting for both requests and tokens.
@@ -399,7 +582,7 @@ class RateLimitedGPT(GPT):
     burst sizes. Uses the DualRateLimiter for thread-safe concurrent access.
     """
 
-    def __init__(self, model_name="gpt-4o-mini", temperature=0.0, max_tokens=8000, provider="openai", key="self", rate_limit_config=None):
+    def __init__(self, model_name="gpt-4o-mini", temperature=None, max_tokens=8000, provider="openai", key="self", rate_limit_config=None):
         """
         Initialize RateLimitedGPT with rate limiting configuration.
 

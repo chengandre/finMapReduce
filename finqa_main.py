@@ -1,5 +1,5 @@
-from mapreduce_qa import process_finqa_qa
-from utils import GPT, RateLimitedGPT, load_prompt_set
+from factory import MapReducePipelineFactory
+from utils import RateLimitedGPT, load_prompt_set
 import argparse
 
 
@@ -66,16 +66,22 @@ def main():
     print(f"  Tokens per minute: {args.tokens_per_minute}")
     print(f"  Request burst size: {args.request_burst_size}")
 
-    results = process_finqa_qa(
-        json_path=args.json_path,
-        doc_dir=args.doc_dir,
-        model_name=args.model_name,
+    # Create FinQA pipeline using factory
+    pipeline = MapReducePipelineFactory.create_finqa_pipeline(
         llm=llm,
         prompts_dict=prompts_dict,
-        num_samples=args.num_samples,
+        doc_dir=args.doc_dir,
         chunk_size=args.chunk_size,
         chunk_overlap=args.chunk_overlap,
         max_concurrent_qa=args.max_concurrent_qa
+    )
+
+    # Process the dataset
+    results = pipeline.process_dataset(
+        data_path=args.json_path,
+        model_name=args.model_name,
+        num_samples=args.num_samples,
+        judge_llm=llm  # FinQA uses same LLM for processing and evaluation
     )
 
     # Print summary results
@@ -119,10 +125,12 @@ def main():
 
     # MapReduce-specific metrics
     print(f"\nMAPREDUCE CONFIG:")
-    mapreduce_config = results["mapreduce_config"]
-    print(f"  Chunk size: {mapreduce_config['chunk_size']}")
-    print(f"  Chunk overlap: {mapreduce_config['chunk_overlap']}")
-    print(f"  Max concurrent QA: {mapreduce_config['max_concurrent_qa']}")
+    config = results["configuration"]
+    print(f"  Chunk size: {config['chunk_size']}")
+    print(f"  Chunk overlap: {config['chunk_overlap']}")
+    print(f"  Max concurrent QA: {config['max_concurrent_qa']}")
+    print(f"  Document type: {config.get('document_type', 'Markdown')}")
+    print(f"  Approach: {config.get('approach', 'MapReduce')}")
 
     # Print detailed results for each QA pair if verbose flag is set
     if args.verbose:

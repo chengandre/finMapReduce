@@ -1,5 +1,5 @@
-from mapreduce_qa import process_financebench_qa
-from utils import GPT, RateLimitedGPT, load_prompt_set
+from factory import MapReducePipelineFactory
+from utils import RateLimitedGPT, load_prompt_set
 import argparse
 
 
@@ -58,7 +58,7 @@ def main():
     llm = RateLimitedGPT(model_name=args.model_name, temperature=args.temperature, max_tokens=args.max_tokens, provider=args.provider, key=args.key, rate_limit_config=config)
     judge = RateLimitedGPT(model_name="deepseek/deepseek-r1-0528:free",
                            temperature=0.0,
-                           max_tokens=4096,
+                           max_tokens=8192,
                            provider="openrouter",
                            rate_limit_config=judge_config)
 
@@ -77,17 +77,22 @@ def main():
     print(f"  Request burst size: {args.request_burst_size}")
     print(f"  PDF parser: {args.pdf_parser}")
 
-    results = process_financebench_qa(
-        jsonl_path=args.jsonl_path,
-        model_name=args.model_name,
+    # Create FinanceBench pipeline using factory
+    pipeline = MapReducePipelineFactory.create_financebench_pipeline(
         llm=llm,
         prompts_dict=prompts_dict,
-        num_samples=args.num_samples,
+        pdf_parser=args.pdf_parser,
         chunk_size=args.chunk_size,
         chunk_overlap=args.chunk_overlap,
-        max_concurrent_qa=args.max_concurrent_qa,
-        pdf_parser=args.pdf_parser,
-        judge=judge
+        max_concurrent_qa=args.max_concurrent_qa
+    )
+
+    # Process the dataset
+    results = pipeline.process_dataset(
+        data_path=args.jsonl_path,
+        model_name=args.model_name,
+        num_samples=args.num_samples,
+        judge_llm=judge
     )
 
     # Print summary results
@@ -130,10 +135,12 @@ def main():
 
     # MapReduce-specific metrics
     print(f"\nMAPREDUCE CONFIG:")
-    mapreduce_config = results["mapreduce_config"]
-    print(f"  Chunk size: {mapreduce_config['chunk_size']}")
-    print(f"  Chunk overlap: {mapreduce_config['chunk_overlap']}")
-    print(f"  Max concurrent QA: {mapreduce_config['max_concurrent_qa']}")
+    config = results["configuration"]
+    print(f"  Chunk size: {config['chunk_size']}")
+    print(f"  Chunk overlap: {config['chunk_overlap']}")
+    print(f"  Max concurrent QA: {config['max_concurrent_qa']}")
+    print(f"  PDF parser: {config.get('pdf_parser', 'unknown')}")
+    print(f"  Approach: {config.get('approach', 'MapReduce')}")
 
     # Print detailed results for each QA pair if verbose flag is set
     if args.verbose:
