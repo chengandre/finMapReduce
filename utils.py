@@ -74,6 +74,22 @@ class GPT:
         """Get the model name."""
         return self.model_name
 
+    def get_temperature(self):
+        """Get the temperature setting."""
+        return self.temperature
+
+    def get_max_tokens(self):
+        """Get the max tokens setting."""
+        return self.max_tokens
+
+    def get_provider(self):
+        """Get the provider setting."""
+        return self.provider
+
+    def get_key(self):
+        """Get the key setting."""
+        return self.key
+
     def __call__(self, prompt, **kwargs):
         max_retries = 50
         base_delay = 2
@@ -448,6 +464,26 @@ class RetryLLM:
         # Create directory for saving prompts if it doesn't exist
         self.prompts_dir = Path("prompts_log")
         self.prompts_dir.mkdir(exist_ok=True)
+
+    def get_model_name(self):
+        """Get the model name."""
+        return self.model_name
+
+    def get_temperature(self):
+        """Get the temperature setting."""
+        return self.temperature
+
+    def get_max_tokens(self):
+        """Get the max tokens setting."""
+        return self.max_tokens
+
+    def get_provider(self):
+        """Get the provider setting."""
+        return self.provider
+
+    def get_key(self):
+        """Get the key setting."""
+        return self.key
 
     def invoke(self, prompt_text):
         """
@@ -918,21 +954,26 @@ def calculate_token_usage_summary(qa_data):
         return {
             "total_input_tokens": 0,
             "total_output_tokens": 0,
+            "total_cache_read_tokens": 0,
             "total_tokens": 0,
             "avg_input_tokens_per_question": 0,
             "avg_output_tokens_per_question": 0,
+            "avg_cache_read_tokens_per_question": 0,
             "token_efficiency_ratio": 0
         }
 
     total_input = sum(qa.get("token_stats", {}).get("total", {}).get("input_tokens", 0) for qa in qa_data)
     total_output = sum(qa.get("token_stats", {}).get("total", {}).get("output_tokens", 0) for qa in qa_data)
+    total_cache_read = sum(qa.get("token_stats", {}).get("total", {}).get("cache_read_tokens", 0) for qa in qa_data)
 
     return {
         "total_input_tokens": total_input,
         "total_output_tokens": total_output,
+        "total_cache_read_tokens": total_cache_read,
         "total_tokens": total_input + total_output,
         "avg_input_tokens_per_question": total_input / len(qa_data),
         "avg_output_tokens_per_question": total_output / len(qa_data),
+        "avg_cache_read_tokens_per_question": total_cache_read / len(qa_data),
         "token_efficiency_ratio": total_output / total_input if total_input > 0 else 0
     }
 

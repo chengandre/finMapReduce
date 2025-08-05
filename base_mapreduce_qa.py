@@ -290,6 +290,7 @@ class BaseMapReduceQA(ABC):
         """Calculate token usage from map phase results."""
         input_tokens = 0
         output_tokens = 0
+        cache_read_tokens = 0
 
         for result in results:
             # Handle different response formats
@@ -299,28 +300,38 @@ class BaseMapReduceQA(ABC):
                 if raw_response and hasattr(raw_response, 'usage_metadata') and raw_response.usage_metadata:
                     input_tokens += raw_response.usage_metadata.get("input_tokens", 0)
                     output_tokens += raw_response.usage_metadata.get("output_tokens", 0)
+                    # Add cache read tokens if available
+                    input_token_details = raw_response.usage_metadata.get("input_token_details", {})
+                    cache_read_tokens += input_token_details.get("cache_read", 0)
                 # Last year format
                 elif result.get('usage'):
                     input_tokens += result['usage'].get("input_tokens", 0)
                     output_tokens += result['usage'].get("output_tokens", 0)
 
-        return {"input_tokens": input_tokens, "output_tokens": output_tokens}
+        return {"input_tokens": input_tokens, "output_tokens": output_tokens, "cache_read_tokens": cache_read_tokens}
 
     def _calculate_reduce_tokens(self, result: Any) -> Dict[str, int]:
         """Calculate token usage from reduce phase result."""
         input_tokens = 0
         output_tokens = 0
+        cache_read_tokens = 0
 
         if isinstance(result, dict):
             raw_response = result.get('raw_response')
             if raw_response and hasattr(raw_response, 'usage_metadata') and raw_response.usage_metadata:
                 input_tokens = raw_response.usage_metadata.get("input_tokens", 0)
                 output_tokens = raw_response.usage_metadata.get("output_tokens", 0)
+                # Add cache read tokens if available
+                input_token_details = raw_response.usage_metadata.get("input_token_details", {})
+                cache_read_tokens = input_token_details.get("cache_read", 0)
         elif hasattr(result, 'usage_metadata') and result.usage_metadata:
             input_tokens = result.usage_metadata.get("input_tokens", 0)
             output_tokens = result.usage_metadata.get("output_tokens", 0)
+            # Add cache read tokens if available
+            input_token_details = result.usage_metadata.get("input_token_details", {})
+            cache_read_tokens = input_token_details.get("cache_read", 0)
 
-        return {"input_tokens": input_tokens, "output_tokens": output_tokens}
+        return {"input_tokens": input_tokens, "output_tokens": output_tokens, "cache_read_tokens": cache_read_tokens}
 
     def _compile_token_stats(self, num_docs: int, map_tokens: Dict, reduce_tokens: Dict) -> Dict:
         """Compile token statistics."""
@@ -330,7 +341,8 @@ class BaseMapReduceQA(ABC):
             "reduce_phase": reduce_tokens,
             "total": {
                 "input_tokens": map_tokens["input_tokens"] + reduce_tokens["input_tokens"],
-                "output_tokens": map_tokens["output_tokens"] + reduce_tokens["output_tokens"]
+                "output_tokens": map_tokens["output_tokens"] + reduce_tokens["output_tokens"],
+                "cache_read_tokens": map_tokens.get("cache_read_tokens", 0) + reduce_tokens.get("cache_read_tokens", 0)
             }
         }
 
@@ -356,9 +368,9 @@ class BaseMapReduceQA(ABC):
         """Return empty token statistics structure."""
         return {
             "len_docs": 0,
-            "map_phase": {"input_tokens": 0, "output_tokens": 0},
-            "reduce_phase": {"input_tokens": 0, "output_tokens": 0},
-            "total": {"input_tokens": 0, "output_tokens": 0}
+            "map_phase": {"input_tokens": 0, "output_tokens": 0, "cache_read_tokens": 0},
+            "reduce_phase": {"input_tokens": 0, "output_tokens": 0, "cache_read_tokens": 0},
+            "total": {"input_tokens": 0, "output_tokens": 0, "cache_read_tokens": 0}
         }
 
     def _print_document_info(self, qa_data: List[Dict[str, Any]]):
@@ -402,6 +414,17 @@ class BaseMapReduceQA(ABC):
         has_question_type = any('question_type' in qa for qa in qa_data)
         accuracy_by_type = calculate_accuracy_by_question_type(qa_data) if has_question_type else {}
 
+        # Get LLM configuration if available
+        llm_config = {}
+        if self.llm and hasattr(self.llm, 'get_model_name'):
+            llm_config = {
+                "model_name": self.llm.get_model_name() if hasattr(self.llm, 'get_model_name') else "unknown",
+                "temperature": self.llm.get_temperature() if hasattr(self.llm, 'get_temperature') else None,
+                "max_tokens": self.llm.get_max_tokens() if hasattr(self.llm, 'get_max_tokens') else None,
+                "provider": self.llm.get_provider() if hasattr(self.llm, 'get_provider') else "unknown",
+                "key": self.llm.get_key() if hasattr(self.llm, 'get_key') else None
+            }
+
         results = {
             "configuration": {
                 "dataset": self.get_dataset_name(),
@@ -410,7 +433,8 @@ class BaseMapReduceQA(ABC):
                 "chunk_size": self.chunk_size,
                 "chunk_overlap": self.chunk_overlap,
                 "max_concurrent_qa": self.max_concurrent_qa,
-                "approach": "MapReduce"
+                "approach": "MapReduce",
+                "llm_configuration": llm_config
             },
             "execution_time": datetime.now().isoformat(),
             "time_taken": process_time,

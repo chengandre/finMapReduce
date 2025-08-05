@@ -10,11 +10,11 @@ import time
 from langchain.prompts import load_prompt
 from tqdm import tqdm
 
-from utils import GPT
+from utils import RateLimitedGPT
 
 def load_all_samples():
     """Load all samples from all JSONL files in the results directory"""
-    results_dir = 'financebench/results'
+    results_dir = '../financebench/results'
     jsonl_files = glob.glob(os.path.join(results_dir, '*.jsonl'))
 
     all_samples = []
@@ -162,18 +162,10 @@ def analyze_results_by_label(judge_response_json, samples):
 
     return results_by_label
 
-def process_batch(batch_id, samples_batch, prompt_template):
-    """Process a batch of samples using the GPT wrapper"""
+def process_batch(batch_id, samples_batch, prompt_template, llm):
+    """Process a batch of samples using the RateLimitedGPT wrapper"""
     # Format samples into context
     context = format_context(samples_batch)
-
-    llm = GPT(
-        model_name="deepseek/deepseek-r1-0528:free",
-        temperature=0.01,
-        max_tokens=8000,
-        provider="openrouter",
-        key=None
-    )
 
     try:
         response = llm(prompt_template, context=context)
@@ -183,12 +175,25 @@ def process_batch(batch_id, samples_batch, prompt_template):
         raw_response = response.get('raw_response')
         raw_content = raw_response.content if raw_response and hasattr(raw_response, 'content') else str(response)
 
+        # Extract token usage information from usage_metadata
+        token_usage = {}
+        if raw_response and hasattr(raw_response, 'usage_metadata'):
+            usage_metadata = raw_response.usage_metadata
+            token_usage = {
+                'input_tokens': usage_metadata.get('input_tokens', 0),
+                'output_tokens': usage_metadata.get('output_tokens', 0),
+                'total_tokens': usage_metadata.get('input_tokens', 0) + usage_metadata.get('output_tokens', 0)
+            }
+
         # Evaluate the judge's performance with validation
         eval_results = evaluate_judge_performance(judge_response_json, samples_batch, raw_content)
 
         if eval_results["success"]:
             label_results = analyze_results_by_label(judge_response_json, samples_batch)
             eval_results["label_results"] = label_results
+
+        # Add token usage to results
+        eval_results["token_usage"] = token_usage
 
         return eval_results
 
@@ -208,7 +213,7 @@ def main():
         return
 
     # Test mode - limit to 20 samples
-    test_mode = True  # Set to False to process all samples
+    test_mode = False  # Set to False to process all samples
     max_samples = 20  # Number of samples to process in test mode
 
     if test_mode:
@@ -255,7 +260,40 @@ def main():
         print(f"Test mode: Selected {len(all_samples)} samples for testing")
 
     # Load prompt template once
-    prompt_template = load_prompt('map_reduce/judge_prompt.yml')
+    prompt_template = load_prompt('prompts/judge_evaluation.yml')
+
+    # Configure rate-limited LLM
+    rate_limiter_config = {
+        "requests_per_minute": 500,
+        "tokens_per_minute": 4000000,
+        "request_burst_size": 50,
+    }
+
+    # rate_limiter_config = {
+    #     "requests_per_minute": 30000,
+    #     "tokens_per_minute": 150000000,
+    #     "request_burst_size": 3000,
+    # }
+
+    model_name = "openrouter/horizon-beta"
+
+    llm = RateLimitedGPT(
+        model_name=model_name,
+        temperature=0.00,
+        max_tokens=8192,
+        provider="openrouter",
+        key="self",
+        rate_limit_config=rate_limiter_config
+    )
+
+    # llm = RateLimitedGPT(
+    #     model_name=model_name,
+    #     temperature=0.00,
+    #     max_tokens=8192,
+    #     provider="openai",
+    #     key="elm",
+    #     rate_limit_config=rate_limiter_config
+    # )
 
     # Batch size for processing
     batch_size = 5  # Each batch contains 5 samples as per the prompt format
@@ -284,11 +322,16 @@ def main():
     validation_errors = 0
     validation_error_responses = []
 
+    # Initialize token usage tracking
+    total_input_tokens = 0
+    total_output_tokens = 0
+    total_tokens = 0
+
     # Process batches in parallel
-    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=50) as executor:
         # Submit all tasks
         future_to_batch = {
-            executor.submit(process_batch, i, batch, prompt_template): (i, batch)
+            executor.submit(process_batch, i, batch, prompt_template, llm): (i, batch)
             for i, batch in enumerate(batches)
         }
 
@@ -316,6 +359,13 @@ def main():
                         for label, data in result["label_results"].items():
                             label_results_aggregate[label]["total"] += data["total"]
                             label_results_aggregate[label]["correct"] += data["correct"]
+
+                        # Update token usage
+                        if "token_usage" in result:
+                            token_usage = result["token_usage"]
+                            total_input_tokens += token_usage.get("input_tokens", 0)
+                            total_output_tokens += token_usage.get("output_tokens", 0)
+                            total_tokens += token_usage.get("total_tokens", 0)
                     else:
                         # Check if it's a validation error or API error
                         error_msg = result.get('error', 'Unknown error')
@@ -347,6 +397,8 @@ def main():
     # Print results
     print("\n===== Results =====")
 
+    print(f"Model: {model_name}")
+
     # Calculate accuracy only on samples that were successfully evaluated
     accuracy = total_correct / total_samples if total_samples > 0 else 0
 
@@ -359,6 +411,16 @@ def main():
     print(f"Processing success rate: {processing_success_rate:.2%} ({total_samples}/{total_expected_samples} samples)")
     print(f"Errors: {validation_errors} validation errors, {api_errors} API errors")
     print(f"Overall Accuracy: {accuracy:.2%} ({total_correct}/{total_samples}) of successfully processed samples")
+
+    # Print token usage
+    print(f"\nToken Usage:")
+    print(f"Input tokens: {total_input_tokens:,}")
+    print(f"Output tokens: {total_output_tokens:,}")
+    print(f"Total tokens: {total_tokens:,}")
+    if total_samples > 0:
+        print(f"Average tokens per sample: {total_tokens / total_samples:.1f}")
+        print(f"Average input tokens per sample: {total_input_tokens / total_samples:.1f}")
+        print(f"Average output tokens per sample: {total_output_tokens / total_samples:.1f}")
 
     print("\nResults by label type:")
     for label, data in label_results_aggregate.items():
@@ -436,6 +498,7 @@ def main():
     results_summary_file = os.path.join(results_dir, f"llm_judge_results_{timestamp}.json")
 
     results_summary = {
+        "model_name": model_name,
         "timestamp": timestamp,
         "test_mode": test_mode,
         "samples_processed": total_samples,
@@ -445,6 +508,14 @@ def main():
         "errors": {
             "validation_errors": validation_errors,
             "api_errors": api_errors
+        },
+        "token_usage": {
+            "input_tokens": total_input_tokens,
+            "output_tokens": total_output_tokens,
+            "total_tokens": total_tokens,
+            "average_tokens_per_sample": total_tokens / total_samples if total_samples > 0 else 0,
+            "average_input_tokens_per_sample": total_input_tokens / total_samples if total_samples > 0 else 0,
+            "average_output_tokens_per_sample": total_output_tokens / total_samples if total_samples > 0 else 0
         },
         "accuracy_by_label": {}
     }

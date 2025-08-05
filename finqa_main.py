@@ -37,6 +37,8 @@ def main():
                       help='Maximum tokens per minute for rate limiting')
     parser.add_argument('--request_burst_size', type=int, default=500,
                       help='Maximum burst size for requests')
+    parser.add_argument('--comment', type=str, default=None,
+                      help='Comment to save alongside the configuration')
 
     args = parser.parse_args()
 
@@ -65,6 +67,7 @@ def main():
     print(f"  Requests per minute: {args.requests_per_minute}")
     print(f"  Tokens per minute: {args.tokens_per_minute}")
     print(f"  Request burst size: {args.request_burst_size}")
+    print(f"  Comment: {args.comment if args.comment else 'None'}")
 
     # Create FinQA pipeline using factory
     pipeline = MapReducePipelineFactory.create_finqa_pipeline(
@@ -81,7 +84,8 @@ def main():
         data_path=args.json_path,
         model_name=args.model_name,
         num_samples=args.num_samples,
-        judge_llm=llm  # FinQA uses same LLM for processing and evaluation
+        judge_llm=llm,  # FinQA uses same LLM for processing and evaluation
+        comment=args.comment
     )
 
     # Print summary results
@@ -89,10 +93,13 @@ def main():
     print("FINQA MAPREDUCE EVALUATION RESULTS")
     print("="*60)
 
-    eval_summary = results["evaluation_summary"]
+    # Get judge model name and evaluation results
+    judge_model_name = list(results["evaluations"].keys())[0]
+    eval_summary = results["evaluations"][judge_model_name]
     token_summary = results["token_usage_summary"]
 
     # Basic results
+    print(f"Judge model: {judge_model_name}")
     print(f"Total samples: {eval_summary['total']}")
     print(f"Overall accuracy: {eval_summary['accuracy']:.2%}")
     print(f"Time taken: {results['time_taken']:.2f} seconds")

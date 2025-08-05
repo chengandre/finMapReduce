@@ -29,14 +29,16 @@ def main():
                       help='API key selector: "self" uses SELF_OPENAI_API_KEY, otherwise uses OPENAI_API_KEY')
     parser.add_argument('--prompt', type=str, default=None,
                       help='Prompt set to use (default, old, last_year, standard, wo_icl)')
-    parser.add_argument('--requests_per_minute', type=int, default=5000,
+    parser.add_argument('--requests_per_minute', type=int, default=30000,
                       help='Maximum requests per minute for rate limiting')
-    parser.add_argument('--tokens_per_minute', type=int, default=4000000,
+    parser.add_argument('--tokens_per_minute', type=int, default=150000000,
                       help='Maximum tokens per minute for rate limiting')
-    parser.add_argument('--request_burst_size', type=int, default=500,
+    parser.add_argument('--request_burst_size', type=int, default=3000,
                       help='Maximum burst size for requests')
     parser.add_argument('--pdf_parser', type=str, default="marker",
                       help='PDF parsing method to use (default: marker)')
+    parser.add_argument('--comment', type=str, default=None,
+                      help='Comment to save alongside the configuration')
 
     args = parser.parse_args()
 
@@ -47,9 +49,9 @@ def main():
         }
 
     judge_config = {
-            'requests_per_minute': 10,
+            'requests_per_minute': 20,
             'tokens_per_minute': 4000000,
-            'request_burst_size': 2
+            'request_burst_size': 4
     }
 
     # Load prompts once at the beginning
@@ -76,6 +78,7 @@ def main():
     print(f"  Tokens per minute: {args.tokens_per_minute}")
     print(f"  Request burst size: {args.request_burst_size}")
     print(f"  PDF parser: {args.pdf_parser}")
+    print(f"  Comment: {args.comment if args.comment else 'None'}")
 
     # Create FinanceBench pipeline using factory
     pipeline = MapReducePipelineFactory.create_financebench_pipeline(
@@ -92,7 +95,8 @@ def main():
         data_path=args.jsonl_path,
         model_name=args.model_name,
         num_samples=args.num_samples,
-        judge_llm=judge
+        judge_llm=judge,
+        comment=args.comment
     )
 
     # Print summary results
@@ -100,10 +104,13 @@ def main():
     print("MAPREDUCE EVALUATION RESULTS")
     print("="*60)
 
-    eval_summary = results["evaluation_summary"]
+    # Get judge model name and evaluation results
+    judge_model_name = list(results["evaluations"].keys())[0]
+    eval_summary = results["evaluations"][judge_model_name]
     token_summary = results["token_usage_summary"]
 
     # Basic results
+    print(f"Judge model: {judge_model_name}")
     print(f"Total samples: {eval_summary['total']}")
     print(f"Overall accuracy: {eval_summary['accuracy']:.2%}")
     print(f"Time taken: {results['time_taken']:.2f} seconds")
