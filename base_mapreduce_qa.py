@@ -478,7 +478,8 @@ class BaseMapReduceQA(ABC):
                     },
                     "detailed_judgments": evaluation_results.get("detailed_judgments", [])
                 }
-            }
+            },
+            "prompts_dict": {k: str(v) for k, v in self.prompts_dict.items()}
         }
 
         # Add any additional configuration from kwargs
@@ -497,13 +498,13 @@ class BaseMapReduceQA(ABC):
         # Create filename
         prompt_name = self.prompts_dict.get('prompt_set_name', 'unknown')
         dataset_name = self.get_dataset_name()
-        file_prefix = f"{results['num_samples']}_{dataset_name}_{prompt_name}_chunk{self.chunk_size}_overlap{self.chunk_overlap}"
+        file_prefix = f"{prompt_name}_chunk{self.chunk_size}_overlap{self.chunk_overlap}_{results['num_samples']}_{dataset_name}"
 
         # Add any additional identifiers from configuration
         if 'pdf_parser' in results['configuration']:
             file_prefix += f"_{results['configuration']['pdf_parser']}"
 
-        results_file = os.path.join(results_dir, f"{file_prefix}_{timestamp}.json")
+        results_file = os.path.join(results_dir, f"{timestamp}_{file_prefix}.json")
 
         with open(results_file, 'w', encoding='utf-8') as f:
             json.dump(results, f, indent=2, ensure_ascii=False)

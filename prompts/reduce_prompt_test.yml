@@ -1,13 +1,26 @@
 _type: "prompt"
 input_variables:  [summaries, question_final]
 template: |
-  Act as as expert financial analyst. Analyze the following question and provide a thorough response that leaves no part of it unaddressed based on the results present in the context below, if possible include numbers.
+  <task>
+  Act as a methodical financial analyst, supporting every conclusion with step-by-step reasoning and verifiable evidence. Analyze the following question and provide a thorough response that leaves no part of it unaddressed based on the relevant information present in the context below, if possible include numbers.
   If you don't know the answer, just say that you don't know, don't try to make up an answer.
 
-  Responses:
-  {summaries}
+  In the context you have a list of facts along with their scores. Prioritize facts with higher scores, if they have the same score, choose the best justified one. Integrate complementary information from different facts.
 
-  Question:
-  {question_final}
+  Output Format:
+  You MUST provide your response as a single, valid JSON object. Do not write any text or explanations outside of the JSON object itself.
 
-  Answer:
+  The JSON object must contain 3 keys:
+    - "reasoning": A string detailing how you synthesized the facts, resolved conflicts, and prioritized information based on relevance scores.
+    - "answer": A string containing your final thorough answer that addresses all of its parts based on the context.
+
+  See template above for the expected JSON structure.
+  </task>
+
+  <context>
+  {context}
+  </context>
+
+  <question>
+  {question}
+  </question>
