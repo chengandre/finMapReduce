@@ -70,6 +70,22 @@ class BaseMapReduceQA(ABC):
         """Parse the final result from reduce phase into standardized format."""
         pass
 
+    def parse_final_result_with_map_data(self, reduce_result: Any, map_results: List[Any]) -> Dict[str, Any]:
+        """
+        Parse final result with access to both map and reduce results.
+
+        Default implementation just calls parse_final_result for backward compatibility.
+        Subclasses can override to use map_results for llm_evidence.
+
+        Args:
+            reduce_result: Result from reduce phase
+            map_results: Filtered results from map phase (after preprocessing)
+
+        Returns:
+            Dictionary with llm_answer, llm_reasoning, llm_evidence
+        """
+        return self.parse_final_result(reduce_result)
+
     @abstractmethod
     def invoke_llm_map(self, chunk: Any, question: str) -> Dict[str, Any]:
         """Invoke LLM for map phase - handles different LLM interfaces."""
@@ -157,7 +173,7 @@ class BaseMapReduceQA(ABC):
         final_result, reduce_tokens = self._reduce_phase(filtered_results, question)
 
         # Step 5: Parse and store results
-        parsed_results = self.parse_final_result(final_result)
+        parsed_results = self.parse_final_result_with_map_data(final_result, filtered_results)
         qa_pair.update(parsed_results)
 
         # Step 6: Store token statistics

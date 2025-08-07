@@ -92,7 +92,7 @@ class LastYearEvaluationFormatter(EvaluationFormatter):
     def extract_sample_data(self, qa_item: Dict[str, Any]) -> Dict[str, Any]:
         """Extract data for last year evaluation format."""
         return {
-            "llm_answer": qa_item.get("llm_answer", "No answer provided"),
+            "llm_answer": qa_item["llm_answer"],
             "golden_answer": qa_item["answer"],
             "question": qa_item["question"]
         }

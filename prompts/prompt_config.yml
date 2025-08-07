@@ -24,5 +24,15 @@ prompt_sets:
     reduce_prompt: "prompts/reduce_prompt.yml"
     judge_prompt: "prompts/judge_prompt.yml"
 
+  test:
+    map_prompt: "prompts/map_prompt_test.yml"
+    reduce_prompt: "prompts/reduce_prompt_test.yml"
+    judge_prompt: "prompts/judge_prompt.yml"
+
+  last_year_json:
+    map_prompt: "prompts/map_prompt_last_year_xml_json.yml"
+    reduce_prompt: "prompts/reduce_prompt_last_year_json.yml"
+    judge_prompt: "prompts/judge_prompt_last_year.yml"
+
 # Default prompt set if none specified
 default_set: "default"

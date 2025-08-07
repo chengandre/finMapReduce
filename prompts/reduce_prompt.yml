@@ -10,11 +10,11 @@ template: |
 
   <template>
   {{
-  "reasoning": "string with your reasoning process and all possible explanations and clarifications",
+  "reasoning": "synthesis process combining map results, handling conflicts, and prioritizing by relevance scores",
   "evidence": [
-    "array of strings with the literal copied evidence from the context"
+    "exact text excerpts from map results that support the final answer"
   ],
-  "answer": "string with your final concise and direct answer to the user query based solely on the given map results"
+  "answer": "direct answer to the query based solely on synthesized map results"
   }}
   </template>
 
@@ -223,9 +223,9 @@ template: |
   You MUST provide your response as a single, valid JSON object. Do not write any text or explanations outside of the JSON object itself.
 
   The JSON object must contain 3 keys:
-    - "reasoning": A string summarising the reasoning process and all possible explanations and clarifications.
-    - "evidence": An array of strings containing the literal copied evidence from the context.
-    - "answer": A string containing your final concise and direct answer to the user query based solely on the given map results. This should not be a summary of a paraphrase, refrain from adding any explanations and clarifications, all these should be included in the reasoning process.
+    - "reasoning": A string detailing how you synthesized the map results, resolved conflicts, and prioritized information based on relevance scores.
+    - "evidence": An array of strings containing EXACT text excerpts copied verbatim from the map results that support your final answer.
+    - "answer": A string containing your final direct answer to the query based SOLELY on the synthesized map results. Provide only the answer without explanations or clarifications.
 
   See template above for the expected JSON structure.
   </task>

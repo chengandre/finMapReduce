@@ -1,9 +1,17 @@
 from factory import MapReducePipelineFactory
 from utils import RateLimitedGPT, load_prompt_set
 import argparse
+import os
+import shutil
 
 
 def main():
+    # Clear prompts_log directory at the beginning
+    prompts_log_dir = "prompts_log"
+    if os.path.exists(prompts_log_dir):
+        shutil.rmtree(prompts_log_dir)
+    os.makedirs(prompts_log_dir, exist_ok=True)
+
     parser = argparse.ArgumentParser(description="Run MapReduce QA on FinanceBench data with LLM evaluation")
     parser.add_argument('--jsonl_path', type=str, default="../financebench/data/financebench_open_source.jsonl",
                       help='Path to the financebench jsonl file')
@@ -19,7 +27,7 @@ def main():
                       help='Overlap between chunks')
     parser.add_argument('--verbose', action='store_true',
                       help='Print detailed results for each QA pair')
-    parser.add_argument('--max_tokens', type=int, default=4096,
+    parser.add_argument('--max_tokens', type=int, default=8192,
                       help='Maximum number of tokens for the LLM')
     parser.add_argument('--provider', type=str, default="openai",
                       help='Provider of the LLM')

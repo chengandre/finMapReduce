@@ -1,9 +1,17 @@
 from factory import MapReducePipelineFactory
 from utils import RateLimitedGPT, load_prompt_set
 import argparse
+import os
+import shutil
 
 
 def main():
+    # Clear prompts_log directory at the beginning
+    prompts_log_dir = "prompts_log"
+    if os.path.exists(prompts_log_dir):
+        shutil.rmtree(prompts_log_dir)
+    os.makedirs(prompts_log_dir, exist_ok=True)
+
     parser = argparse.ArgumentParser(description="Run MapReduce QA on FinQA data with LLM evaluation")
     parser.add_argument('--json_path', type=str, default="../finqa_balanced_subset.json",
                       help='Path to the FinQA json file')
