@@ -212,6 +212,11 @@ class BaseMapReduceQA(ABC):
         # Print document information
         self._print_document_info(qa_data)
 
+        # Preprocess questions in parallel if enabled
+        question_improvement_tokens = {"input_tokens": 0, "output_tokens": 0, "cache_read_tokens": 0}
+        if kwargs.get('preprocess_questions', False):
+            qa_data, question_improvement_tokens = self._preprocess_questions_parallel(qa_data)
+
         t1 = time.time()
         print(f"Processing {len(qa_data)} QA pairs with {self.max_concurrent_qa} concurrent workers...")
 
@@ -249,7 +254,7 @@ class BaseMapReduceQA(ABC):
         judge_model_name = judge.get_model_name() if hasattr(judge, 'get_model_name') else model_name
 
         # Compile and save results
-        results = self._compile_results(qa_data, evaluation_results, model_name, judge_model_name, process_time, **kwargs)
+        results = self._compile_results(qa_data, evaluation_results, model_name, judge_model_name, process_time, question_improvement_tokens=question_improvement_tokens, **kwargs)
         results_file = self._save_results(results)
 
         # Print summary
@@ -424,6 +429,9 @@ class BaseMapReduceQA(ABC):
         """Compile final results dictionary."""
         from utils import calculate_token_usage_summary, calculate_accuracy_by_question_type
 
+        # Extract question improvement tokens from kwargs
+        question_improvement_tokens = kwargs.pop('question_improvement_tokens', {"input_tokens": 0, "output_tokens": 0, "cache_read_tokens": 0})
+
         token_summary = calculate_token_usage_summary(qa_data)
 
         # Check if question_type exists in data
@@ -456,6 +464,7 @@ class BaseMapReduceQA(ABC):
             "time_taken": process_time,
             "num_samples": len(qa_data),
             "token_usage_summary": token_summary,
+            "question_improvement_tokens": question_improvement_tokens,
             "qa_data": qa_data,
             "evaluations": {
                 judge_model_name: {
@@ -523,3 +532,118 @@ class BaseMapReduceQA(ABC):
         print(f"No answer: {evaluation_results['no_answer']} ({evaluation_results['no_answer']/evaluation_results['total']*100:.1f}%)")
         print(f"Overall Accuracy: {evaluation_results['accuracy']:.2%}")
         print("========================\n")
+
+    def _preprocess_questions_parallel(self, qa_data: List[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], Dict[str, int]]:
+        """
+        Preprocess questions in parallel to make them clearer and more effective.
+
+        Args:
+            qa_data: List of QA pairs with original questions
+
+        Returns:
+            Tuple of (updated qa_data with improved questions, aggregated token usage)
+        """
+        print(f"Preprocessing {len(qa_data)} questions in parallel...")
+
+        def improve_single_question(qa_pair):
+            try:
+                improved_question, tokens = self.improve_question(qa_pair["question"])
+                qa_pair["original_question"] = qa_pair["question"]
+                qa_pair["question"] = improved_question
+                return qa_pair, tokens
+            except Exception as e:
+                print(f"Error improving question: {e}")
+                empty_tokens = {"input_tokens": 0, "output_tokens": 0, "cache_read_tokens": 0}
+                return qa_pair, empty_tokens
+
+        # Track total token usage
+        total_tokens = {"input_tokens": 0, "output_tokens": 0, "cache_read_tokens": 0}
+
+        # Process in parallel
+        with concurrent.futures.ThreadPoolExecutor(max_workers=self.max_concurrent_qa) as executor:
+            future_to_index = {
+                executor.submit(improve_single_question, qa_pair): i
+                for i, qa_pair in enumerate(qa_data)
+            }
+
+            # Update qa_data in place and collect token usage
+            with tqdm(total=len(qa_data), desc="Improving questions", unit="question") as pbar:
+                for future in concurrent.futures.as_completed(future_to_index):
+                    original_index = future_to_index[future]
+                    try:
+                        improved_qa_pair, tokens = future.result()
+                        qa_data[original_index] = improved_qa_pair
+                        # Aggregate token usage
+                        total_tokens["input_tokens"] += tokens["input_tokens"]
+                        total_tokens["output_tokens"] += tokens["output_tokens"]
+                        total_tokens["cache_read_tokens"] += tokens["cache_read_tokens"]
+                        pbar.update(1)
+                    except Exception as e:
+                        print(f"Error processing question {original_index}: {e}")
+                        # qa_data[original_index] already has the original, no need to reassign
+                        pbar.update(1)
+
+        print("Question preprocessing completed.")
+        print(f"Question improvement tokens: {total_tokens['input_tokens']} input, {total_tokens['output_tokens']} output, {total_tokens['cache_read_tokens']} cache read")
+        return qa_data, total_tokens
+
+    def improve_question(self, original_question: str) -> Tuple[str, Dict[str, int]]:
+        """
+        Improve a single question to make it clearer and more effective.
+        Uses the question_improvement_prompt if available, otherwise returns original.
+
+        Args:
+            original_question: The original question text
+
+        Returns:
+            Tuple of (improved question text, token usage dict)
+        """
+        empty_tokens = {"input_tokens": 0, "output_tokens": 0, "cache_read_tokens": 0}
+
+        # Check if question improvement prompt is available
+        if 'question_improvement_prompt' not in self.prompts_dict:
+            print("Warning: question_improvement_prompt not available, keeping original questions")
+            return original_question, empty_tokens
+
+        try:
+            # Use the GPT wrapper's JSON parsing capability
+            prompt = self.prompts_dict['question_improvement_prompt']
+            response = self.llm(prompt, question=original_question)
+
+            # Extract token usage
+            tokens = self._extract_token_usage_from_response(response)
+
+            # Extract improved question from JSON response
+            if isinstance(response, dict) and 'json' in response:
+                json_data = response['json']
+                if isinstance(json_data, dict) and 'improved_question' in json_data:
+                    improved = json_data['improved_question'].strip()
+                    if improved:
+                        return improved, tokens
+
+            # Fallback to original if JSON parsing fails
+            print(f"Warning: Could not parse improved question, using original")
+            return original_question, tokens
+
+        except Exception as e:
+            print(f"Error improving question, using original: {e}")
+            return original_question, empty_tokens
+
+    def _extract_token_usage_from_response(self, response: Any) -> Dict[str, int]:
+        """Extract token usage from LLM response."""
+        tokens = {"input_tokens": 0, "output_tokens": 0, "cache_read_tokens": 0}
+
+        if isinstance(response, dict):
+            raw_response = response.get('raw_response')
+            if raw_response and hasattr(raw_response, 'usage_metadata') and raw_response.usage_metadata:
+                tokens["input_tokens"] = raw_response.usage_metadata.get("input_tokens", 0)
+                tokens["output_tokens"] = raw_response.usage_metadata.get("output_tokens", 0)
+                input_token_details = raw_response.usage_metadata.get("input_token_details", {})
+                tokens["cache_read_tokens"] = input_token_details.get("cache_read", 0)
+        elif hasattr(response, 'usage_metadata') and response.usage_metadata:
+            tokens["input_tokens"] = response.usage_metadata.get("input_tokens", 0)
+            tokens["output_tokens"] = response.usage_metadata.get("output_tokens", 0)
+            input_token_details = response.usage_metadata.get("input_token_details", {})
+            tokens["cache_read_tokens"] = input_token_details.get("cache_read", 0)
+
+        return tokens

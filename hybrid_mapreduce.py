@@ -19,6 +19,7 @@ class HybridMapReduce(BaseMapReduceQA):
                  prompts_dict: Dict[str, Any],
                  map_llm=None,
                  reduce_llm=None,
+                 question_improvement_llm=None,
                  pdf_parser: str = "marker",
                  score_threshold: int = 50,
                  **kwargs):
@@ -30,6 +31,7 @@ class HybridMapReduce(BaseMapReduceQA):
             prompts_dict: Dictionary containing prompt templates
             map_llm: LLM for map phase (RateLimitedRetryLLM for direct invocation). If None, uses llm.
             reduce_llm: LLM for reduce phase (RateLimitedGPT for JSON parsing). If None, uses llm.
+            question_improvement_llm: LLM for question preprocessing. If None, uses llm.
             pdf_parser: PDF parsing method ('marker', 'pypdf', etc.)
             score_threshold: Minimum score to keep map results (default: 50)
             **kwargs: Additional arguments for parent class
@@ -40,6 +42,7 @@ class HybridMapReduce(BaseMapReduceQA):
         # Store separate LLMs for map and reduce phases
         self.map_llm = map_llm if map_llm is not None else llm
         self.reduce_llm = reduce_llm if reduce_llm is not None else llm
+        self.question_improvement_llm = question_improvement_llm if question_improvement_llm is not None else llm
 
     def load_data(self, data_path: str, num_samples: Optional[int] = None) -> List[Dict[str, Any]]:
         """Load FinanceBench data for hybrid pipeline."""
@@ -241,13 +244,65 @@ class HybridMapReduce(BaseMapReduceQA):
         """Get the map question from QA pair."""
         return qa_pair["question"]
 
+    def improve_question(self, original_question: str) -> Tuple[str, Dict[str, int]]:
+        """
+        Override to use separate question improvement LLM.
+
+        Args:
+            original_question: The original question text
+
+        Returns:
+            Tuple of (improved question text, token usage dict)
+        """
+        empty_tokens = {"input_tokens": 0, "output_tokens": 0, "cache_read_tokens": 0}
+
+        # Check if question improvement prompt is available
+        if 'question_improvement_prompt' not in self.prompts_dict:
+            print("Warning: question_improvement_prompt not available, keeping original questions")
+            return original_question, empty_tokens
+
+        try:
+            # Use the question improvement LLM instead of the default llm
+            prompt = self.prompts_dict['question_improvement_prompt']
+            response = self.question_improvement_llm(prompt, question=original_question)
+
+            # Extract token usage
+            tokens = self._extract_token_usage_from_response(response)
+
+            # Extract improved question from JSON response
+            if isinstance(response, dict) and 'json' in response:
+                json_data = response['json']
+                if isinstance(json_data, dict) and 'improved_question' in json_data:
+                    improved = json_data['improved_question'].strip()
+                    if improved:
+                        return improved, tokens
+
+            # Fallback to original if JSON parsing fails
+            print(f"Warning: Could not parse improved question, using original")
+            return original_question, tokens
+
+        except Exception as e:
+            print(f"Error improving question, using original: {e}")
+            return original_question, empty_tokens
+
     def _compile_results(self, qa_data: List[Dict], evaluation_results: Dict,
                         model_name: str, judge_model_name: str, process_time: float, **kwargs) -> Dict:
         """
-        Override to add pdf_parser and approach to configuration.
+        Override to add pdf_parser, approach, and question improvement LLM configuration.
         """
         results = super()._compile_results(qa_data, evaluation_results, model_name, judge_model_name, process_time, **kwargs)
         results["configuration"]["pdf_parser"] = self.pdf_parser
         results["configuration"]["score_threshold"] = self.score_threshold
         results["configuration"]["approach"] = "Hybrid MapReduce (Text Map + JSON Reduce)"
+
+        # Add question improvement LLM configuration
+        if hasattr(self.question_improvement_llm, 'get_model_name'):
+            results["configuration"]["question_improvement_llm"] = {
+                "model_name": self.question_improvement_llm.get_model_name(),
+                "temperature": self.question_improvement_llm.get_temperature() if hasattr(self.question_improvement_llm, 'get_temperature') else None,
+                "max_tokens": self.question_improvement_llm.get_max_tokens() if hasattr(self.question_improvement_llm, 'get_max_tokens') else None,
+                "provider": self.question_improvement_llm.get_provider() if hasattr(self.question_improvement_llm, 'get_provider') else None,
+                "key": self.question_improvement_llm.get_key() if hasattr(self.question_improvement_llm, 'get_key') else None
+            }
+
         return results

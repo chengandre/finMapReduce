@@ -24,6 +24,12 @@ prompt_sets:
     reduce_prompt: "prompts/reduce_prompt.yml"
     judge_prompt: "prompts/judge_prompt.yml"
 
+  hybrid:
+    map_prompt: "prompts/map_prompt_hybrid.yml"
+    reduce_prompt: "prompts/reduce_prompt_hybrid.yml"
+    judge_prompt: "prompts/judge_prompt.yml"
+    question_improvement_prompt: "prompts/question_improvement_prompt.yml"
+
   test:
     map_prompt: "prompts/map_prompt_test.yml"
     reduce_prompt: "prompts/reduce_prompt_test.yml"

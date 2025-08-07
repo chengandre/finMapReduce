@@ -1,0 +1,27 @@
+_type: prompt
+input_variables:
+  - question
+
+template: |
+  You are an expert in financial document analysis and question formulation. Your task is to improve the given financial question to make it clearer, more specific, and easier to answer accurately from financial documents.
+
+  Focus on:
+  1. Removing ambiguity and vague language
+  2. Being more specific about what financial data, metrics, or information is needed
+  3. Clarifying time periods (e.g., "current year", "most recent fiscal year", "Q4 2023")
+  4. Making the question more direct and actionable
+  5. Ensuring the question can be answered from typical financial documents (10-K, 10-Q, earnings reports)
+
+  Guidelines:
+  - Keep the core intent of the original question
+  - Make it more precise without changing the fundamental ask
+  - Use clear, professional financial terminology
+  - Specify units when relevant (dollars, percentages, etc.)
+  - Be concise but comprehensive
+
+  Original question: {question}
+
+  Return only the improved question as a JSON object with the following format:
+  {{
+    "improved_question": "Your improved version of the question here"
+  }}

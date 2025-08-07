@@ -35,7 +35,7 @@ def main():
                       help='Maximum number of QA pairs to process concurrently')
     parser.add_argument('--key', type=str, default=None,
                       help='API key selector: "self" uses SELF_OPENAI_API_KEY, otherwise uses OPENAI_API_KEY')
-    parser.add_argument('--prompt', type=str, default="test",
+    parser.add_argument('--prompt', type=str, default="hybrid",
                       help='Prompt set to use (test for map_prompt_test.yml and reduce_prompt_test.yml)')
     parser.add_argument('--requests_per_minute', type=int, default=30000,
                       help='Maximum requests per minute for rate limiting')
@@ -104,6 +104,16 @@ def main():
         rate_limit_config=config
     )
 
+    # # Create separate LLM for question improvement
+    # question_improvement_llm = RateLimitedGPT(
+    #     model_name="gpt-4o",
+    #     temperature=args.temperature,
+    #     max_tokens=args.max_tokens,
+    #     provider="openai",
+    #     key=args.key,
+    #     rate_limit_config=config
+    # )
+
     print(f"\nCONFIGURATION:")
     print(f"  Model name: {args.model_name}")
     print(f"  Number of samples: {args.num_samples if args.num_samples else 'all'}")
@@ -127,6 +137,7 @@ def main():
         prompts_dict=prompts_dict,
         map_llm=map_llm,  # RateLimitedRetryLLM for map phase text output
         reduce_llm=reduce_llm,  # RateLimitedGPT for reduce phase JSON output
+        # question_improvement_llm=question_improvement_llm,  # LLM for question preprocessing
         pdf_parser=args.pdf_parser,
         score_threshold=args.score_threshold,
         chunk_size=args.chunk_size,
@@ -140,7 +151,8 @@ def main():
         model_name=args.model_name,
         num_samples=args.num_samples,
         judge_llm=judge,
-        comment=args.comment
+        comment=args.comment,
+        preprocess_questions=False
     )
 
     # Print summary results
