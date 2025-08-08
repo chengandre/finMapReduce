@@ -45,7 +45,7 @@ def main():
                       help='Maximum burst size for requests')
     parser.add_argument('--pdf_parser', type=str, default="marker",
                       help='PDF parsing method to use (default: marker)')
-    parser.add_argument('--score_threshold', type=int, default=50,
+    parser.add_argument('--score_threshold', type=int, default=5,
                       help='Minimum score threshold for map results filtering (default: 50)')
     parser.add_argument('--comment', type=str, default=None,
                       help='Comment to save alongside the configuration')
