@@ -343,6 +343,9 @@ class LLMJudgeEvaluator:
             # Get judge response
             judge_response = self.llm(self.judge_prompt, context=context)
 
+            # Extract token usage
+            tokens = self._extract_token_usage_from_response(judge_response)
+
             # Parse response
             evaluation_data = self._parse_judge_response(judge_response)
 
@@ -350,7 +353,8 @@ class LLMJudgeEvaluator:
                 "batch_idx": batch_idx,
                 "success": True,
                 "evaluation_data": evaluation_data,
-                "batch": batch
+                "batch": batch,
+                "tokens": tokens
             }
         except Exception as e:
             print(f"Error processing batch {batch_idx + 1}: {str(e)}")
@@ -372,7 +376,8 @@ class LLMJudgeEvaluator:
                 "success": False,
                 "evaluation_data": fallback,
                 "batch": batch,
-                "error": str(e)
+                "error": str(e),
+                "tokens": {"input_tokens": 0, "output_tokens": 0, "cache_read_tokens": 0}
             }
 
     def _parse_judge_response(self, judge_response: Any) -> Dict[str, Any]:
@@ -482,6 +487,14 @@ class LLMJudgeEvaluator:
 
             total_samples += 1
 
+        # Calculate evaluation token totals
+        evaluation_tokens = {"input_tokens": 0, "output_tokens": 0, "cache_read_tokens": 0}
+        for result in batch_results:
+            tokens = result.get("tokens", {})
+            evaluation_tokens["input_tokens"] += tokens.get("input_tokens", 0)
+            evaluation_tokens["output_tokens"] += tokens.get("output_tokens", 0)
+            evaluation_tokens["cache_read_tokens"] += tokens.get("cache_read_tokens", 0)
+
         # Collect all detailed judgments
         all_judgments = []
         for result in batch_results:
@@ -496,10 +509,30 @@ class LLMJudgeEvaluator:
             "no_answer": judgment_counts["no_answer"],
             "total": total_samples,
             "accuracy": judgment_counts["correct"] / total_samples if total_samples > 0 else 0,
+            "evaluation_tokens": evaluation_tokens,
             "detailed_judgments": all_judgments
         }
 
         return results
+
+    def _extract_token_usage_from_response(self, response: Any) -> Dict[str, int]:
+        """Extract token usage from LLM response."""
+        tokens = {"input_tokens": 0, "output_tokens": 0, "cache_read_tokens": 0}
+
+        if isinstance(response, dict):
+            raw_response = response.get('raw_response')
+            if raw_response and hasattr(raw_response, 'usage_metadata') and raw_response.usage_metadata:
+                tokens["input_tokens"] = raw_response.usage_metadata.get("input_tokens", 0)
+                tokens["output_tokens"] = raw_response.usage_metadata.get("output_tokens", 0)
+                input_token_details = raw_response.usage_metadata.get("input_token_details", {})
+                tokens["cache_read_tokens"] = input_token_details.get("cache_read", 0)
+        elif hasattr(response, 'usage_metadata') and response.usage_metadata:
+            tokens["input_tokens"] = response.usage_metadata.get("input_tokens", 0)
+            tokens["output_tokens"] = response.usage_metadata.get("output_tokens", 0)
+            input_token_details = response.usage_metadata.get("input_token_details", {})
+            tokens["cache_read_tokens"] = input_token_details.get("cache_read", 0)
+
+        return tokens
 
 
 def evaluate_with_llm_judge(llm: Any,

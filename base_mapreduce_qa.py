@@ -480,6 +480,13 @@ class BaseMapReduceQA(ABC):
 
         token_summary = calculate_token_usage_summary(qa_data)
 
+        # Calculate phase-level token totals across dataset
+        phase_token_totals = self._calculate_phase_token_totals(qa_data)
+
+        # Add evaluation tokens if available
+        evaluation_tokens = evaluation_results.get("evaluation_tokens", {"input_tokens": 0, "output_tokens": 0, "cache_read_tokens": 0})
+        phase_token_totals["evaluation_phase_total"] = evaluation_tokens
+
         # Calculate timing averages
         timing_averages = self._calculate_timing_averages(qa_data)
 
@@ -513,6 +520,7 @@ class BaseMapReduceQA(ABC):
             "time_taken": process_time,
             "num_samples": len(qa_data),
             "token_usage_summary": token_summary,
+            "phase_token_totals": phase_token_totals,
             "timing_summary": timing_averages,
             "question_improvement_tokens": question_improvement_tokens,
             "qa_data": qa_data,
@@ -636,6 +644,31 @@ class BaseMapReduceQA(ABC):
         print("Question preprocessing completed.")
         print(f"Question improvement tokens: {total_tokens['input_tokens']} input, {total_tokens['output_tokens']} output, {total_tokens['cache_read_tokens']} cache read")
         return qa_data, total_tokens
+
+    def _calculate_phase_token_totals(self, qa_data: List[Dict[str, Any]]) -> Dict[str, Dict[str, int]]:
+        """Calculate dataset-level token totals for map and reduce phases separately."""
+        map_totals = {"input_tokens": 0, "output_tokens": 0, "cache_read_tokens": 0}
+        reduce_totals = {"input_tokens": 0, "output_tokens": 0, "cache_read_tokens": 0}
+
+        for qa_pair in qa_data:
+            token_stats = qa_pair.get('token_stats', {})
+
+            # Aggregate map phase tokens
+            map_phase = token_stats.get('map_phase', {})
+            map_totals["input_tokens"] += map_phase.get("input_tokens", 0)
+            map_totals["output_tokens"] += map_phase.get("output_tokens", 0)
+            map_totals["cache_read_tokens"] += map_phase.get("cache_read_tokens", 0)
+
+            # Aggregate reduce phase tokens
+            reduce_phase = token_stats.get('reduce_phase', {})
+            reduce_totals["input_tokens"] += reduce_phase.get("input_tokens", 0)
+            reduce_totals["output_tokens"] += reduce_phase.get("output_tokens", 0)
+            reduce_totals["cache_read_tokens"] += reduce_phase.get("cache_read_tokens", 0)
+
+        return {
+            "map_phase_total": map_totals,
+            "reduce_phase_total": reduce_totals
+        }
 
     def improve_question(self, original_question: str) -> Tuple[str, Dict[str, int]]:
         """
