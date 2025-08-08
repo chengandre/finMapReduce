@@ -158,7 +158,7 @@ class BaseMapReduceQA(ABC):
             return self._handle_document_error(qa_pair, "No documents loaded")
 
         # Step 2: Map phase - process chunks in parallel
-        map_results, map_tokens = self._map_phase(docs, map_question)
+        map_results, map_tokens, map_time = self._map_phase(docs, map_question)
 
         if not map_results:
             return self._handle_processing_error(qa_pair, "No results from map phase")
@@ -170,15 +170,15 @@ class BaseMapReduceQA(ABC):
             return self._handle_processing_error(qa_pair, "No results after preprocessing")
 
         # Step 4: Reduce phase - combine results
-        final_result, reduce_tokens = self._reduce_phase(filtered_results, question)
+        final_result, reduce_tokens, reduce_time = self._reduce_phase(filtered_results, question)
 
         # Step 5: Parse and store results
         parsed_results = self.parse_final_result_with_map_data(final_result, filtered_results)
         qa_pair.update(parsed_results)
 
-        # Step 6: Store token statistics
+        # Step 6: Store token statistics and timing
         qa_pair["token_stats"] = self._compile_token_stats(
-            len(docs), map_tokens, reduce_tokens
+            len(docs), map_tokens, reduce_tokens, map_time, reduce_time
         )
 
         return qa_pair
@@ -264,8 +264,9 @@ class BaseMapReduceQA(ABC):
 
     # ===== Internal Methods =====
 
-    def _map_phase(self, docs: List[Any], question: str) -> Tuple[List[Dict], Dict[str, int]]:
+    def _map_phase(self, docs: List[Any], question: str) -> Tuple[List[Dict], Dict[str, int], float]:
         """Execute map phase on document chunks."""
+        map_start_time = time.time()
         results = []
 
         def process_chunk(chunk):
@@ -290,22 +291,28 @@ class BaseMapReduceQA(ABC):
                     print(f"Error processing chunk: {e}")
                     results.append({"error": str(e)})
 
+        map_time = time.time() - map_start_time
+
         # Calculate token usage
         tokens = self._calculate_map_tokens(results)
-        return results, tokens
+        return results, tokens, map_time
 
-    def _reduce_phase(self, map_results: List[Any], question: str) -> Tuple[Any, Dict[str, int]]:
+    def _reduce_phase(self, map_results: List[Any], question: str) -> Tuple[Any, Dict[str, int], float]:
         """Execute reduce phase on map results."""
+        reduce_start_time = time.time()
+
         # Format results for reduce
         formatted_results = self.format_map_results_for_reduce(map_results, question)
 
         # Invoke reduce
         result_final = self.invoke_llm_reduce(formatted_results, question)
 
+        reduce_time = time.time() - reduce_start_time
+
         # Get token usage
         tokens = self._calculate_reduce_tokens(result_final)
 
-        return result_final, tokens
+        return result_final, tokens, reduce_time
 
     def _calculate_map_tokens(self, results: List[Dict]) -> Dict[str, int]:
         """Calculate token usage from map phase results."""
@@ -354,12 +361,17 @@ class BaseMapReduceQA(ABC):
 
         return {"input_tokens": input_tokens, "output_tokens": output_tokens, "cache_read_tokens": cache_read_tokens}
 
-    def _compile_token_stats(self, num_docs: int, map_tokens: Dict, reduce_tokens: Dict) -> Dict:
-        """Compile token statistics."""
+    def _compile_token_stats(self, num_docs: int, map_tokens: Dict, reduce_tokens: Dict, map_time: float, reduce_time: float) -> Dict:
+        """Compile token statistics and timing."""
         return {
             "len_docs": num_docs,
             "map_phase": map_tokens,
             "reduce_phase": reduce_tokens,
+            "timing": {
+                "map_phase_time": map_time,
+                "reduce_phase_time": reduce_time,
+                "total_time": map_time + reduce_time
+            },
             "total": {
                 "input_tokens": map_tokens["input_tokens"] + reduce_tokens["input_tokens"],
                 "output_tokens": map_tokens["output_tokens"] + reduce_tokens["output_tokens"],
@@ -391,6 +403,11 @@ class BaseMapReduceQA(ABC):
             "len_docs": 0,
             "map_phase": {"input_tokens": 0, "output_tokens": 0, "cache_read_tokens": 0},
             "reduce_phase": {"input_tokens": 0, "output_tokens": 0, "cache_read_tokens": 0},
+            "timing": {
+                "map_phase_time": 0.0,
+                "reduce_phase_time": 0.0,
+                "total_time": 0.0
+            },
             "total": {"input_tokens": 0, "output_tokens": 0, "cache_read_tokens": 0}
         }
 
@@ -424,6 +441,35 @@ class BaseMapReduceQA(ABC):
             formatter_type=formatter_type
         )
 
+    def _calculate_timing_averages(self, qa_data: List[Dict[str, Any]]) -> Dict[str, float]:
+        """Calculate average timing statistics from all QA pairs."""
+        map_times = []
+        reduce_times = []
+        total_times = []
+
+        for qa_pair in qa_data:
+            token_stats = qa_pair.get('token_stats', {})
+            timing = token_stats.get('timing', {})
+
+            if timing:
+                map_time = timing.get('map_phase_time', 0.0)
+                reduce_time = timing.get('reduce_phase_time', 0.0)
+                total_time = timing.get('total_time', 0.0)
+
+                if map_time > 0:
+                    map_times.append(map_time)
+                if reduce_time > 0:
+                    reduce_times.append(reduce_time)
+                if total_time > 0:
+                    total_times.append(total_time)
+
+        return {
+            "average_map_phase_time": sum(map_times) / len(map_times) if map_times else 0.0,
+            "average_reduce_phase_time": sum(reduce_times) / len(reduce_times) if reduce_times else 0.0,
+            "average_total_mapreduce_time": sum(total_times) / len(total_times) if total_times else 0.0,
+            "samples_with_timing": len(total_times)
+        }
+
     def _compile_results(self, qa_data: List[Dict], evaluation_results: Dict,
                         model_name: str, judge_model_name: str, process_time: float, **kwargs) -> Dict:
         """Compile final results dictionary."""
@@ -433,6 +479,9 @@ class BaseMapReduceQA(ABC):
         question_improvement_tokens = kwargs.pop('question_improvement_tokens', {"input_tokens": 0, "output_tokens": 0, "cache_read_tokens": 0})
 
         token_summary = calculate_token_usage_summary(qa_data)
+
+        # Calculate timing averages
+        timing_averages = self._calculate_timing_averages(qa_data)
 
         # Check if question_type exists in data
         has_question_type = any('question_type' in qa for qa in qa_data)
@@ -464,6 +513,7 @@ class BaseMapReduceQA(ABC):
             "time_taken": process_time,
             "num_samples": len(qa_data),
             "token_usage_summary": token_summary,
+            "timing_summary": timing_averages,
             "question_improvement_tokens": question_improvement_tokens,
             "qa_data": qa_data,
             "evaluations": {
