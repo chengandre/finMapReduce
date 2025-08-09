@@ -1,20 +1,20 @@
-from typing import Dict, List, Any, Tuple, Optional
 import json
 import os
-from json_based_mapreduce import JSONBasedMapReduce
+from typing import Dict, List, Any, Tuple, Optional
+from dataset_loader import DatasetLoader
 from utils import load_markdown_chunk
 
 
-def load_finqa_data(json_path, num_samples=None):
+def load_finqa_data(json_path: str, num_samples: Optional[int] = None) -> List[Dict[str, Any]]:
     """
     Load QA pairs from FinQA json file
 
     Args:
-        json_path (str): Path to the FinQA json file
-        num_samples (int): Number of samples to load
+        json_path: Path to the FinQA json file
+        num_samples: Number of samples to load
 
     Returns:
-        list: List of QA dictionaries with necessary information
+        List of QA dictionaries with necessary information
     """
     with open(json_path, 'r', encoding='utf-8') as f:
         data = json.load(f)
@@ -26,7 +26,6 @@ def load_finqa_data(json_path, num_samples=None):
         if num_samples is not None and count >= num_samples:
             break
 
-        # Create a QA pair with the necessary information
         qa_pair = {
             "doc_name": item["doc_name"],
             "question": item["question"],
@@ -41,26 +40,23 @@ def load_finqa_data(json_path, num_samples=None):
     return qa_data
 
 
-class FinQAMapReduce(JSONBasedMapReduce):
+class FinQALoader(DatasetLoader):
     """
-    FinQA-specific implementation of MapReduce QA pipeline.
+    Dataset loader for FinQA data.
 
-    Features:
-    - Loads data from JSON format
-    - Processes Markdown documents
-    - Uses JSON-based prompts and responses
-    - No question_type analysis (FinQA doesn't have this field)
+    Handles:
+    - Loading JSON format data
+    - Markdown document processing
+    - FinQA-specific paths and configurations
     """
 
-    def __init__(self, *args, doc_dir: str, **kwargs):
+    def __init__(self, doc_dir: str):
         """
-        Initialize FinQA pipeline.
+        Initialize FinQA loader.
 
         Args:
             doc_dir: Directory containing FinQA markdown documents
-            *args, **kwargs: Arguments passed to parent class
         """
-        super().__init__(*args, **kwargs)
         self.doc_dir = doc_dir
 
     def load_data(self, data_path: str, num_samples: Optional[int] = None) -> List[Dict[str, Any]]:
@@ -76,20 +72,25 @@ class FinQAMapReduce(JSONBasedMapReduce):
         """
         return load_finqa_data(data_path, num_samples)
 
-    def load_document_chunks(self, qa_pair: Dict[str, Any]) -> Tuple[List[Any], int]:
+    def load_document_chunks(self, qa_pair: Dict[str, Any], chunk_size: int, chunk_overlap: int) -> Tuple[List[Any], int]:
         """
         Load and chunk Markdown document.
 
         Args:
             qa_pair: Dictionary containing 'doc_name' key
+            chunk_size: Size of document chunks for processing
+            chunk_overlap: Overlap between consecutive chunks
 
         Returns:
             Tuple of (list of document chunks, total token count)
         """
         doc_name = qa_pair["doc_name"]
         markdown_file = os.path.join(self.doc_dir, doc_name)
-        return load_markdown_chunk(markdown_file, self.chunk_size, self.chunk_overlap)
+        return load_markdown_chunk(markdown_file, chunk_size, chunk_overlap)
 
+    def get_document_identifier(self, qa_pair: Dict[str, Any]) -> str:
+        """Get document name for display."""
+        return qa_pair.get("doc_name", "unknown")
 
     def get_results_directory(self) -> str:
         """Get directory for saving results."""
@@ -99,13 +100,9 @@ class FinQAMapReduce(JSONBasedMapReduce):
         """Get dataset name."""
         return "finqa"
 
-    def _compile_results(self, qa_data: List[Dict], evaluation_results: Dict,
-                        model_name: str, judge_model_name: str, process_time: float, **kwargs) -> Dict:
-        """
-        Override to set pdf_parser as 'markdown' and skip question_type analysis.
-        """
-        results = super()._compile_results(qa_data, evaluation_results, model_name, judge_model_name, process_time, **kwargs)
-        results["configuration"]["pdf_parser"] = "markdown"
-        # Clear question_type analysis since FinQA doesn't have this field
-        results["evaluation_summary"]["accuracy_by_question_type"] = {}
-        return results
+    def add_dataset_config(self, config: Dict[str, Any]) -> Dict[str, Any]:
+        """Add FinQA-specific configuration."""
+        config = super().add_dataset_config(config)
+        config["pdf_parser"] = "markdown"
+        config["doc_dir"] = self.doc_dir
+        return config

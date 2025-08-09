@@ -1,18 +1,17 @@
-from hybrid_mapreduce import HybridMapReduce
-from utils import RateLimitedGPT, load_prompt_set
+from factory import MapReducePipelineFactory
+from utils import RateLimitedGPT, RateLimitedRetryLLM, load_prompt_set
 import argparse
 import os
 import shutil
 
 
 def main():
-    # Clear prompts_log directory at the beginning
     prompts_log_dir = "prompts_log"
     if os.path.exists(prompts_log_dir):
         shutil.rmtree(prompts_log_dir)
     os.makedirs(prompts_log_dir, exist_ok=True)
 
-    parser = argparse.ArgumentParser(description="Run Hybrid MapReduce QA on FinanceBench data with LLM evaluation")
+    parser = argparse.ArgumentParser(description="Run Hybrid MapReduce QA on FinanceBench data with new architecture")
     parser.add_argument('--jsonl_path', type=str, default="../financebench/data/financebench_open_source.jsonl",
                       help='Path to the financebench jsonl file')
     parser.add_argument('--model_name', type=str, default="gpt-4o-mini",
@@ -36,7 +35,7 @@ def main():
     parser.add_argument('--key', type=str, default=None,
                       help='API key selector: "self" uses SELF_OPENAI_API_KEY, otherwise uses OPENAI_API_KEY')
     parser.add_argument('--prompt', type=str, default="hybrid",
-                      help='Prompt set to use (test for map_prompt_test.yml and reduce_prompt_test.yml)')
+                      help='Prompt set to use (hybrid for map_prompt_hybrid.yml and reduce_prompt_hybrid.yml)')
     parser.add_argument('--requests_per_minute', type=int, default=30000,
                       help='Maximum requests per minute for rate limiting')
     parser.add_argument('--tokens_per_minute', type=int, default=150000000,
@@ -45,7 +44,7 @@ def main():
                       help='Maximum burst size for requests')
     parser.add_argument('--pdf_parser', type=str, default="marker",
                       help='PDF parsing method to use (default: marker)')
-    parser.add_argument('--score_threshold', type=int, default=5,
+    parser.add_argument('--score_threshold', type=int, default=50,
                       help='Minimum score threshold for map results filtering (default: 50)')
     parser.add_argument('--comment', type=str, default=None,
                       help='Comment to save alongside the configuration')
@@ -53,23 +52,20 @@ def main():
     args = parser.parse_args()
 
     config = {
-            'requests_per_minute': args.requests_per_minute,
-            'tokens_per_minute': args.tokens_per_minute,
-            'request_burst_size': args.request_burst_size
-        }
-
-    judge_config = {
-            'requests_per_minute': 20,
-            'tokens_per_minute': 4000000,
-            'request_burst_size': 4
+        'requests_per_minute': args.requests_per_minute,
+        'tokens_per_minute': args.tokens_per_minute,
+        'request_burst_size': args.request_burst_size
     }
 
-    # Load prompts once at the beginning
+    judge_config = {
+        'requests_per_minute': 20,
+        'tokens_per_minute': 4000000,
+        'request_burst_size': 4
+    }
+
     prompts_dict = load_prompt_set(args.prompt)
 
-    # Create both LLM instances for hybrid approach
-    # Map phase uses RateLimitedRetryLLM for direct invocation (text output)
-    from utils import RateLimitedRetryLLM
+    # Create LLM instances for hybrid approach
     map_llm = RateLimitedRetryLLM(
         model_name=args.model_name,
         temperature=args.temperature,
@@ -79,7 +75,6 @@ def main():
         rate_limit_config=config
     )
 
-    # Reduce phase uses RateLimitedGPT for JSON parsing
     reduce_llm = RateLimitedGPT(
         model_name=args.model_name,
         temperature=args.temperature,
@@ -89,32 +84,18 @@ def main():
         rate_limit_config=config
     )
 
-    # judge = RateLimitedGPT(model_name="deepseek/deepseek-r1-0528:free",
-    #                        temperature=0.0,
-    #                        max_tokens=8192,
-    #                        provider="openrouter",
-    #                        rate_limit_config=judge_config)
-
     judge = RateLimitedGPT(
-        model_name="gpt-4o",
-        temperature=args.temperature,
-        max_tokens=args.max_tokens,
+        model_name="gpt-4o-mini",
+        temperature=0.0,
+        max_tokens=8192,
         provider="openai",
         key=args.key,
-        rate_limit_config=config
+        rate_limit_config=judge_config
     )
 
-    # # Create separate LLM for question improvement
-    # question_improvement_llm = RateLimitedGPT(
-    #     model_name="gpt-4o",
-    #     temperature=args.temperature,
-    #     max_tokens=args.max_tokens,
-    #     provider="openai",
-    #     key=args.key,
-    #     rate_limit_config=config
-    # )
-
     print(f"\nCONFIGURATION:")
+    print(f"  Dataset: financebench")
+    print(f"  Format type: hybrid")
     print(f"  Model name: {args.model_name}")
     print(f"  Number of samples: {args.num_samples if args.num_samples else 'all'}")
     print(f"  Temperature: {args.temperature}")
@@ -124,35 +105,31 @@ def main():
     print(f"  Key: {args.key if args.key else 'default'}")
     print(f"  Path: {args.jsonl_path}")
     print(f"  Prompt set: {args.prompt}")
-    print(f"  Requests per minute: {args.requests_per_minute}")
-    print(f"  Tokens per minute: {args.tokens_per_minute}")
-    print(f"  Request burst size: {args.request_burst_size}")
     print(f"  PDF parser: {args.pdf_parser}")
     print(f"  Score threshold: {args.score_threshold}")
     print(f"  Comment: {args.comment if args.comment else 'None'}")
 
-    # Create Hybrid pipeline with separate LLMs for map and reduce phases
-    pipeline = HybridMapReduce(
+    # Create FinanceBench pipeline with hybrid format using new factory
+    pipeline = MapReducePipelineFactory.create_pipeline(
+        dataset='financebench',
+        format_type='hybrid',
         llm=reduce_llm,  # Primary LLM for base class compatibility
         prompts_dict=prompts_dict,
-        map_llm=map_llm,  # RateLimitedRetryLLM for map phase text output
-        reduce_llm=reduce_llm,  # RateLimitedGPT for reduce phase JSON output
-        # question_improvement_llm=question_improvement_llm,  # LLM for question preprocessing
         pdf_parser=args.pdf_parser,
         score_threshold=args.score_threshold,
+        map_llm=map_llm,
+        reduce_llm=reduce_llm,
         chunk_size=args.chunk_size,
         chunk_overlap=args.chunk_overlap,
         max_concurrent_qa=args.max_concurrent_qa
     )
 
-    # Process the dataset
     results = pipeline.process_dataset(
         data_path=args.jsonl_path,
         model_name=args.model_name,
         num_samples=args.num_samples,
         judge_llm=judge,
-        comment=args.comment,
-        preprocess_questions=False
+        comment=args.comment
     )
 
     # Print summary results
@@ -160,27 +137,24 @@ def main():
     print("HYBRID MAPREDUCE EVALUATION RESULTS")
     print("="*60)
 
-    # Get judge model name and evaluation results
     judge_model_name = list(results["evaluations"].keys())[0]
     eval_summary = results["evaluations"][judge_model_name]
     token_summary = results["token_usage_summary"]
 
-    # Basic results
+    print(f"Dataset: {results['configuration']['dataset']}")
+    print(f"Approach: {results['configuration']['approach']}")
     print(f"Judge model: {judge_model_name}")
     print(f"Total samples: {eval_summary['total']}")
     print(f"Overall accuracy: {eval_summary['accuracy']:.2%}")
     print(f"Time taken: {results['time_taken']:.2f} seconds")
 
-    # Token usage summary
     print(f"\nTOKEN USAGE SUMMARY:")
     print(f"  Total input tokens: {token_summary['total_input_tokens']:,}")
     print(f"  Total output tokens: {token_summary['total_output_tokens']:,}")
     print(f"  Total tokens: {token_summary['total_tokens']:,}")
     print(f"  Avg input per question: {token_summary['avg_input_tokens_per_question']:.0f}")
     print(f"  Avg output per question: {token_summary['avg_output_tokens_per_question']:.0f}")
-    print(f"  Token efficiency ratio: {token_summary['token_efficiency_ratio']:.3f}")
 
-    # Judgment distribution
     print(f"\nJUDGMENT DISTRIBUTION:")
     judgments = eval_summary['judgment_distribution']
     percentages = eval_summary['judgment_percentages']
@@ -190,13 +164,11 @@ def main():
     print(f"  Incorrect: {judgments['incorrect']} ({percentages['incorrect']:.1%})")
     print(f"  No answer: {judgments['no_answer']} ({percentages['no_answer']:.1%})")
 
-    # Accuracy by question type
     print(f"\nACCURACY BY QUESTION TYPE:")
     accuracy_by_type = eval_summary['accuracy_by_question_type']
     for q_type, stats in accuracy_by_type.items():
         print(f"  {q_type}: {stats['accuracy']:.1%} ({stats['correct']}/{stats['total']})")
 
-    # MapReduce-specific metrics
     print(f"\nHYBRID MAPREDUCE CONFIG:")
     config = results["configuration"]
     print(f"  Chunk size: {config['chunk_size']}")
@@ -206,7 +178,6 @@ def main():
     print(f"  Score threshold: {config.get('score_threshold', 'unknown')}")
     print(f"  Approach: {config.get('approach', 'Hybrid MapReduce')}")
 
-    # Print detailed results for each QA pair if verbose flag is set
     if args.verbose:
         print("\n===== Detailed Results =====")
         for i, qa_item in enumerate(results["qa_data"]):
@@ -216,7 +187,6 @@ def main():
             print(f"LLM Answer: {qa_item['llm_answer']}")
             print(f"Golden Answer: {qa_item['answer']}")
             print(f"Judgment: {qa_item.get('judgment', 'N/A')}")
-            print(f"Reasoning: {qa_item.get('reasoning', 'N/A')}")
 
     print(f"\nResults saved to file")
 

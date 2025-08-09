@@ -78,33 +78,7 @@ class FinanceBenchMapReduce(JSONBasedMapReduce):
         """
         return load_financebench_data(data_path, num_samples)
 
-    def load_document_chunks(self, qa_pair: Dict[str, Any]) -> Tuple[List[Any], int]:
-        """
-        Load and chunk PDF document.
 
-        Args:
-            qa_pair: Dictionary containing 'doc_name' key
-
-        Returns:
-            Tuple of (list of document chunks, total token count)
-        """
-        doc_name = qa_pair["doc_name"]
-        documents, token_count = load_pdf_chunk(
-            doc_name,
-            self.chunk_size,
-            self.chunk_overlap,
-            method=self.pdf_parser
-        )
-
-        # Handle the case where load_pdf_chunk returns None values
-        if documents is None or token_count is None:
-            return [], 0
-
-        return documents, token_count
-
-    def get_document_identifier(self, qa_pair: Dict[str, Any]) -> str:
-        """Get document name for display."""
-        return qa_pair.get("doc_name", "unknown")
 
     def get_results_directory(self) -> str:
         """Get directory for saving results."""

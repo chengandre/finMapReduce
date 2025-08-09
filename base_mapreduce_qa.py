@@ -24,19 +24,28 @@ class BaseMapReduceQA(ABC):
                  chunk_size: int = 36000,
                  chunk_overlap: int = 1000,
                  max_concurrent_qa: int = 40,
-                 max_concurrent_chunks: int = 40):
+                 max_concurrent_chunks: int = 40,
+                 map_llm: Optional[Any] = None,
+                 reduce_llm: Optional[Any] = None,
+                 judge_llm: Optional[Any] = None):
         """
         Initialize the MapReduce QA pipeline.
 
         Args:
-            llm: Language model instance (can be None if subclass handles it)
+            llm: Primary language model instance
             prompts_dict: Dictionary containing prompt templates
             chunk_size: Size of document chunks for processing
             chunk_overlap: Overlap between consecutive chunks
             max_concurrent_qa: Maximum concurrent QA pairs to process
             max_concurrent_chunks: Maximum concurrent chunks in map phase
+            map_llm: Optional separate LLM for map phase (defaults to llm)
+            reduce_llm: Optional separate LLM for reduce phase (defaults to llm)
+            judge_llm: Optional separate LLM for evaluation (defaults to llm)
         """
         self.llm = llm
+        self.map_llm = map_llm if map_llm is not None else llm
+        self.reduce_llm = reduce_llm if reduce_llm is not None else llm
+        self.judge_llm = judge_llm if judge_llm is not None else llm
         self.prompts_dict = prompts_dict
         self.chunk_size = chunk_size
         self.chunk_overlap = chunk_overlap
@@ -50,10 +59,6 @@ class BaseMapReduceQA(ABC):
         """Load QA data from dataset-specific format."""
         pass
 
-    @abstractmethod
-    def load_document_chunks(self, qa_pair: Dict[str, Any]) -> Tuple[List[Any], int]:
-        """Load and chunk a document for the given QA pair."""
-        pass
 
     @abstractmethod
     def preprocess_map_results(self, results: List[Dict[str, Any]]) -> List[Any]:
@@ -126,6 +131,34 @@ class BaseMapReduceQA(ABC):
     def get_map_question(self, qa_pair) -> str:
         """Get the map question"""
         return qa_pair["question"]
+
+    def load_document_chunks(self, qa_pair: Dict[str, Any]) -> Tuple[List[Any], int]:
+        """
+        Default implementation for loading PDF chunks.
+        
+        Args:
+            qa_pair: Dictionary containing 'doc_name' key
+            
+        Returns:
+            Tuple of (list of document chunks, total token count)
+        """
+        from utils import load_pdf_chunk
+        
+        doc_name = qa_pair["doc_name"]
+        pdf_parser = getattr(self, 'pdf_parser', 'marker')
+        
+        documents, token_count = load_pdf_chunk(
+            doc_name,
+            self.chunk_size,
+            self.chunk_overlap,
+            method=pdf_parser
+        )
+
+        # Handle the case where load_pdf_chunk returns None values
+        if documents is None or token_count is None:
+            return [], 0
+
+        return documents, token_count
 
 
     # ===== Core Workflow Methods =====
@@ -247,7 +280,7 @@ class BaseMapReduceQA(ABC):
 
         # Evaluate with judge
         print("Evaluating answers using LLM judge...")
-        judge = judge_llm if judge_llm is not None else self.llm
+        judge = judge_llm if judge_llm is not None else self.judge_llm
         evaluation_results = self._evaluate_with_judge(judge, qa_data)
 
         # Get judge model name

@@ -1,53 +1,37 @@
 import re
-from typing import Dict, List, Any, Tuple, Optional
-from base_mapreduce_qa import BaseMapReduceQA
-from financebench_mapreduce import load_financebench_data
+from typing import Dict, List, Any, Union, Optional, Tuple
+from output_formatter import OutputFormatter
 
 
-class HybridMapReduce(BaseMapReduceQA):
+class HybridFormatter(OutputFormatter):
     """
-    Hybrid MapReduce implementation combining:
-    - Map phase: Text output with score-based filtering (like LastYearMapReduce)
-    - Reduce phase: JSON output format (like LastYearJSONMapReduce)
+    Output formatter for hybrid map/reduce operations.
 
-    Uses prompts/map_prompt_test.yml for map phase and prompts/reduce_prompt_test.yml for reduce phase.
+    Combines:
+    - Map phase: Plain text output with score-based filtering
+    - Reduce phase: JSON output format
+    - Supports multiple LLM instances for different phases
     """
 
     def __init__(self,
-                 llm,
                  prompts_dict: Dict[str, Any],
-                 map_llm=None,
-                 reduce_llm=None,
-                 question_improvement_llm=None,
-                 pdf_parser: str = "marker",
-                 score_threshold: int = 50,
-                 **kwargs):
+                 question_improvement_llm: Optional[Any] = None,
+                 score_threshold: int = 50):
         """
-        Initialize hybrid pipeline.
+        Initialize hybrid formatter.
 
         Args:
-            llm: Primary LLM instance (used as fallback and for base class compatibility)
             prompts_dict: Dictionary containing prompt templates
-            map_llm: LLM for map phase (RateLimitedRetryLLM for direct invocation). If None, uses llm.
-            reduce_llm: LLM for reduce phase (RateLimitedGPT for JSON parsing). If None, uses llm.
-            question_improvement_llm: LLM for question preprocessing. If None, uses llm.
-            pdf_parser: PDF parsing method ('marker', 'pypdf', etc.)
-            score_threshold: Minimum score to keep map results (default: 50)
-            **kwargs: Additional arguments for parent class
+            question_improvement_llm: LLM for question preprocessing
+            score_threshold: Minimum score threshold for filtering results
         """
-        super().__init__(llm=llm, prompts_dict=prompts_dict, map_llm=map_llm, reduce_llm=reduce_llm, **kwargs)
-        self.pdf_parser = pdf_parser
+        super().__init__(prompts_dict)
+        self.question_improvement_llm = question_improvement_llm
         self.score_threshold = score_threshold
-        self.question_improvement_llm = question_improvement_llm if question_improvement_llm is not None else llm
-
-    def load_data(self, data_path: str, num_samples: Optional[int] = None) -> List[Dict[str, Any]]:
-        """Load FinanceBench data for hybrid pipeline."""
-        return load_financebench_data(data_path, num_samples)
-
 
     def invoke_llm_map(self, chunk: Any, question: str) -> Dict[str, Any]:
         """
-        Map phase using direct LLM invocation for text output (like LastYearMapReduce).
+        Map phase using direct LLM invocation for text output.
 
         Args:
             chunk: Document chunk with page_content attribute
@@ -61,10 +45,8 @@ class HybridMapReduce(BaseMapReduceQA):
             question_int=question
         )
 
-        # Use map_llm (RateLimitedRetryLLM) for direct invoke with retry and rate limiting
         response = self.map_llm.invoke(prompt)
 
-        # Return in standardized format
         if hasattr(response, 'usage_metadata') and response.usage_metadata:
             return {
                 'content': response.content,
@@ -74,7 +56,7 @@ class HybridMapReduce(BaseMapReduceQA):
 
     def invoke_llm_reduce(self, formatted_results: Any, question: str) -> Any:
         """
-        Reduce phase using GPT wrapper for JSON output (like LastYearJSONMapReduce).
+        Reduce phase using GPT wrapper for JSON output.
 
         Args:
             formatted_results: Formatted string of map results
@@ -88,7 +70,7 @@ class HybridMapReduce(BaseMapReduceQA):
 
     def preprocess_map_results(self, results: List[Dict[str, Any]]) -> List[str]:
         """
-        Filter based on score extraction from text (like LastYearMapReduce).
+        Filter based on score extraction from text.
 
         Only keeps results with Score > score_threshold.
 
@@ -120,7 +102,7 @@ class HybridMapReduce(BaseMapReduceQA):
 
         Args:
             results: List of filtered content strings
-            question: The original question (unused in this implementation)
+            question: The original question (unused)
 
         Returns:
             Concatenated string of results
@@ -129,9 +111,9 @@ class HybridMapReduce(BaseMapReduceQA):
 
     def parse_final_result(self, result: Any) -> Dict[str, Any]:
         """
-        Parse JSON result from reduce phase (like LastYearJSONMapReduce).
+        Parse JSON result from reduce phase.
 
-        Expects JSON with 2 keys: "reasoning" and "answer"
+        Expects JSON with keys: "reasoning" and "answer"
 
         Args:
             result: Result from reduce phase (should have 'json' key)
@@ -147,7 +129,6 @@ class HybridMapReduce(BaseMapReduceQA):
                 "llm_evidence": []
             }
         else:
-            # Fallback to raw response content
             raw_response = result.get('raw_response')
             if raw_response:
                 answer = raw_response.content if hasattr(raw_response, 'content') else str(raw_response)
@@ -160,7 +141,7 @@ class HybridMapReduce(BaseMapReduceQA):
                 "llm_evidence": []
             }
 
-    def parse_final_result_with_map_data(self, reduce_result: Any, map_results: List[Any]) -> Dict[str, Any]:
+    def parse_final_result_with_map_data(self, reduce_result: Any, map_results: List[str]) -> Dict[str, Any]:
         """
         Parse final result with map results included in llm_evidence.
 
@@ -176,10 +157,9 @@ class HybridMapReduce(BaseMapReduceQA):
             return {
                 "llm_answer": reduce_json.get("answer", ""),
                 "llm_reasoning": reduce_json.get("reasoning", ""),
-                "llm_evidence": map_results  # Include filtered map results
+                "llm_evidence": map_results
             }
         else:
-            # Fallback to raw response content
             raw_response = reduce_result.get('raw_response')
             if raw_response:
                 answer = raw_response.content if hasattr(raw_response, 'content') else str(raw_response)
@@ -192,37 +172,33 @@ class HybridMapReduce(BaseMapReduceQA):
                 "llm_evidence": map_results
             }
 
-
-    def get_results_directory(self) -> str:
-        """Get directory for saving results."""
-        return "financebench_results"
-
-    def get_dataset_name(self) -> str:
-        """Get dataset name."""
-        return "financebench_hybrid"
-
-    def get_judge_prompt_key(self) -> str:
-        """Get the key for judge prompt."""
-        return 'judge_prompt'
-
     def get_evaluation_formatter_type(self) -> Optional[str]:
-        """Use default evaluation formatter."""
+        """Use last year evaluation formatter for hybrid."""
         return "last_year"
 
-    def get_map_question(self, qa_pair) -> str:
-        """Get the map question from QA pair."""
-        return qa_pair["question"]
-
     def improve_question(self, original_question: str) -> Tuple[str, Dict[str, int]]:
-        """Override to use separate question improvement LLM."""
+        """
+        Improve a single question using the question improvement LLM.
+
+        Args:
+            original_question: The original question text
+
+        Returns:
+            Tuple of (improved question text, token usage dict)
+        """
         empty_tokens = {"input_tokens": 0, "output_tokens": 0, "cache_read_tokens": 0}
 
         if 'question_improvement_prompt' not in self.prompts_dict:
+            print("Warning: question_improvement_prompt not available, keeping original questions")
             return original_question, empty_tokens
 
         try:
             prompt = self.prompts_dict['question_improvement_prompt']
-            response = self.question_improvement_llm(prompt, question=original_question)
+            if self.question_improvement_llm:
+                response = self.question_improvement_llm(prompt, question=original_question)
+            else:
+                response = self.reduce_llm(prompt, question=original_question)
+
             tokens = self._extract_token_usage_from_response(response)
 
             if isinstance(response, dict) and 'json' in response:
@@ -232,24 +208,40 @@ class HybridMapReduce(BaseMapReduceQA):
                     if improved:
                         return improved, tokens
 
+            print(f"Warning: Could not parse improved question, using original")
             return original_question, tokens
+
         except Exception as e:
-            print(f"Error improving question: {e}")
+            print(f"Error improving question, using original: {e}")
             return original_question, empty_tokens
 
-    def _compile_results(self, qa_data: List[Dict], evaluation_results: Dict,
-                        model_name: str, judge_model_name: str, process_time: float, **kwargs) -> Dict:
-        """
-        Override to add pdf_parser, approach, and question improvement LLM configuration.
-        """
-        results = super()._compile_results(qa_data, evaluation_results, model_name, judge_model_name, process_time, **kwargs)
-        results["configuration"]["pdf_parser"] = self.pdf_parser
-        results["configuration"]["score_threshold"] = self.score_threshold
-        results["configuration"]["approach"] = "Hybrid MapReduce (Text Map + JSON Reduce)"
+    def _extract_token_usage_from_response(self, response: Any) -> Dict[str, int]:
+        """Extract token usage from LLM response."""
+        tokens = {"input_tokens": 0, "output_tokens": 0, "cache_read_tokens": 0}
 
-        # Add question improvement LLM configuration
+        if isinstance(response, dict):
+            raw_response = response.get('raw_response')
+            if raw_response and hasattr(raw_response, 'usage_metadata') and raw_response.usage_metadata:
+                tokens["input_tokens"] = raw_response.usage_metadata.get("input_tokens", 0)
+                tokens["output_tokens"] = raw_response.usage_metadata.get("output_tokens", 0)
+                input_token_details = raw_response.usage_metadata.get("input_token_details", {})
+                tokens["cache_read_tokens"] = input_token_details.get("cache_read", 0)
+        elif hasattr(response, 'usage_metadata') and response.usage_metadata:
+            tokens["input_tokens"] = response.usage_metadata.get("input_tokens", 0)
+            tokens["output_tokens"] = response.usage_metadata.get("output_tokens", 0)
+            input_token_details = response.usage_metadata.get("input_token_details", {})
+            tokens["cache_read_tokens"] = input_token_details.get("cache_read", 0)
+
+        return tokens
+
+    def add_format_config(self, config: Dict[str, Any]) -> Dict[str, Any]:
+        """Add hybrid formatter configuration."""
+        config = super().add_format_config(config)
+        config["approach"] = "Hybrid MapReduce (Text Map + JSON Reduce)"
+        config["score_threshold"] = self.score_threshold
+
         if hasattr(self.question_improvement_llm, 'get_model_name'):
-            results["configuration"]["question_improvement_llm"] = {
+            config["question_improvement_llm"] = {
                 "model_name": self.question_improvement_llm.get_model_name(),
                 "temperature": self.question_improvement_llm.get_temperature() if hasattr(self.question_improvement_llm, 'get_temperature') else None,
                 "max_tokens": self.question_improvement_llm.get_max_tokens() if hasattr(self.question_improvement_llm, 'get_max_tokens') else None,
@@ -257,4 +249,4 @@ class HybridMapReduce(BaseMapReduceQA):
                 "key": self.question_improvement_llm.get_key() if hasattr(self.question_improvement_llm, 'get_key') else None
             }
 
-        return results
+        return config
