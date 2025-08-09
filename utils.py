@@ -16,7 +16,7 @@ from pydantic import SecretStr
 from dotenv import load_dotenv
 from langchain.schema import Document
 from langchain_openai import ChatOpenAI
-from langchain.text_splitter import CharacterTextSplitter
+from langchain.text_splitter import CharacterTextSplitter, RecursiveCharacterTextSplitter
 from langchain_community.document_loaders import PyPDFLoader, PDFMinerLoader, PyMuPDFLoader, UnstructuredPDFLoader
 from langchain.prompts import load_prompt
 import yaml
@@ -831,7 +831,7 @@ def _process_documents(documents, chunk_size, chunk_overlap, use_tiktoken=False)
 
     # Choose appropriate text splitter
     if use_tiktoken:
-        text_splitter = CharacterTextSplitter.from_tiktoken_encoder(
+        text_splitter = RecursiveCharacterTextSplitter.from_tiktoken_encoder(
             encoding_name="cl100k_base",
             chunk_size=chunk_size,
             chunk_overlap=chunk_overlap
@@ -1000,8 +1000,18 @@ def calculate_accuracy_by_question_type(qa_data):
                 "incorrect": 0, "no_answer": 0, "total": 0
             }
 
-        if judgment in question_type_stats[q_type]:
-            question_type_stats[q_type][judgment] += 1
+        # Normalize judgment to match dictionary keys
+        if judgment == "correct":
+            question_type_stats[q_type]["correct"] += 1
+        elif judgment == "coherent":
+            question_type_stats[q_type]["coherent"] += 1
+        elif judgment == "deviated":
+            question_type_stats[q_type]["deviated"] += 1
+        elif judgment == "incorrect":
+            question_type_stats[q_type]["incorrect"] += 1
+        elif judgment == "no answer" or judgment == "no_answer":
+            question_type_stats[q_type]["no_answer"] += 1
+
         question_type_stats[q_type]["total"] += 1
 
     # Calculate accuracy for each question type
@@ -1013,6 +1023,57 @@ def calculate_accuracy_by_question_type(qa_data):
             stats["accuracy"] = 0
 
     return question_type_stats
+
+
+def calculate_accuracy_by_question_reasoning(qa_data):
+    """
+    Calculate accuracy metrics broken down by question_reasoning.
+
+    Args:
+        qa_data (list): List of QA pair dictionaries with question_reasoning and judgment fields
+
+    Returns:
+        dict: Nested dictionary with accuracy stats per question reasoning category
+    """
+    reasoning_stats = {}
+
+    for qa in qa_data:
+        q_reasoning = qa.get("question_reasoning")
+        # Handle null/None values
+        if q_reasoning is None:
+            q_reasoning = "null"
+
+        judgment = qa.get("judgment", "unknown").lower()
+
+        if q_reasoning not in reasoning_stats:
+            reasoning_stats[q_reasoning] = {
+                "correct": 0, "coherent": 0, "deviated": 0,
+                "incorrect": 0, "no_answer": 0, "total": 0
+            }
+
+        # Normalize judgment to match dictionary keys
+        if judgment == "correct":
+            reasoning_stats[q_reasoning]["correct"] += 1
+        elif judgment == "coherent":
+            reasoning_stats[q_reasoning]["coherent"] += 1
+        elif judgment == "deviated":
+            reasoning_stats[q_reasoning]["deviated"] += 1
+        elif judgment == "incorrect":
+            reasoning_stats[q_reasoning]["incorrect"] += 1
+        elif judgment == "no answer" or judgment == "no_answer":
+            reasoning_stats[q_reasoning]["no_answer"] += 1
+
+        reasoning_stats[q_reasoning]["total"] += 1
+
+    # Calculate accuracy for each reasoning category
+    for q_reasoning in reasoning_stats:
+        stats = reasoning_stats[q_reasoning]
+        if stats["total"] > 0:
+            stats["accuracy"] = stats["correct"] / stats["total"]
+        else:
+            stats["accuracy"] = 0.0
+
+    return reasoning_stats
 
 
 def load_prompt_set(prompt_set_name=None):
@@ -1046,5 +1107,9 @@ def load_prompt_set(prompt_set_name=None):
         'judge_prompt': load_prompt(prompt_files['judge_prompt']),
         'prompt_set_name': prompt_set_name
     }
+
+    # Load question improvement prompt if available
+    if 'question_improvement_prompt' in prompt_files:
+        loaded_prompts['question_improvement_prompt'] = load_prompt(prompt_files['question_improvement_prompt'])
 
     return loaded_prompts

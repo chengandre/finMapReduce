@@ -473,7 +473,7 @@ class BaseMapReduceQA(ABC):
     def _compile_results(self, qa_data: List[Dict], evaluation_results: Dict,
                         model_name: str, judge_model_name: str, process_time: float, **kwargs) -> Dict:
         """Compile final results dictionary."""
-        from utils import calculate_token_usage_summary, calculate_accuracy_by_question_type
+        from utils import calculate_token_usage_summary, calculate_accuracy_by_question_type, calculate_accuracy_by_question_reasoning
 
         # Extract question improvement tokens from kwargs
         question_improvement_tokens = kwargs.pop('question_improvement_tokens', {"input_tokens": 0, "output_tokens": 0, "cache_read_tokens": 0})
@@ -493,6 +493,10 @@ class BaseMapReduceQA(ABC):
         # Check if question_type exists in data
         has_question_type = any('question_type' in qa for qa in qa_data)
         accuracy_by_type = calculate_accuracy_by_question_type(qa_data) if has_question_type else {}
+
+        # Check if question_reasoning exists in data
+        has_question_reasoning = any('question_reasoning' in qa for qa in qa_data)
+        accuracy_by_reasoning = calculate_accuracy_by_question_reasoning(qa_data) if has_question_reasoning else {}
 
         # Get LLM configuration if available
         llm_config = {}
@@ -536,6 +540,7 @@ class BaseMapReduceQA(ABC):
                     "total": evaluation_results["total"],
                     "accuracy": evaluation_results["accuracy"],
                     "accuracy_by_question_type": accuracy_by_type,
+                    "accuracy_by_question_reasoning": accuracy_by_reasoning,
                     "judgment_percentages": {
                         "correct": evaluation_results["correct"] / evaluation_results["total"] if evaluation_results["total"] > 0 else 0,
                         "coherent": evaluation_results["coherent"] / evaluation_results["total"] if evaluation_results["total"] > 0 else 0,
@@ -546,7 +551,7 @@ class BaseMapReduceQA(ABC):
                     "detailed_judgments": evaluation_results.get("detailed_judgments", [])
                 }
             },
-            "prompts_dict": {k: str(v) for k, v in self.prompts_dict.items()}
+            "prompts_dict": self._serialize_prompts(self.prompts_dict)
         }
 
         # Add any additional configuration from kwargs
@@ -730,3 +735,74 @@ class BaseMapReduceQA(ABC):
             tokens["cache_read_tokens"] = input_token_details.get("cache_read", 0)
 
         return tokens
+
+    def _serialize_prompts(self, prompts_dict: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Serialize prompts dictionary to preserve LangChain structure for easy loading.
+
+        Args:
+            prompts_dict: Dictionary containing prompt objects
+
+        Returns:
+            Serialized prompts dictionary with metadata for reconstruction
+        """
+        serialized = {}
+
+        for key, prompt in prompts_dict.items():
+            if hasattr(prompt, 'template'):
+                # LangChain PromptTemplate
+                serialized[key] = {
+                    'type': 'langchain_prompt_template',
+                    'template': prompt.template,
+                    'input_variables': getattr(prompt, 'input_variables', [])
+                }
+            elif isinstance(prompt, str):
+                # Simple string prompt
+                serialized[key] = {
+                    'type': 'string',
+                    'template': prompt
+                }
+            else:
+                # Fallback to string representation
+                serialized[key] = {
+                    'type': 'string',
+                    'template': str(prompt)
+                }
+
+        return serialized
+
+    @staticmethod
+    def load_prompts_from_json(json_file_path: str) -> Dict[str, Any]:
+        """
+        Load prompts from a JSON results file and reconstruct LangChain objects.
+
+        Args:
+            json_file_path: Path to the JSON results file
+
+        Returns:
+            Dictionary with reconstructed prompt objects
+        """
+        from langchain.prompts import PromptTemplate
+
+        with open(json_file_path, 'r', encoding='utf-8') as f:
+            results = json.load(f)
+
+        prompts_data = results.get('prompts_dict', {})
+        prompts_dict = {}
+
+        for key, prompt_data in prompts_data.items():
+            if isinstance(prompt_data, dict) and 'type' in prompt_data:
+                if prompt_data['type'] == 'langchain_prompt_template':
+                    # Reconstruct LangChain PromptTemplate
+                    prompts_dict[key] = PromptTemplate(
+                        template=prompt_data['template'],
+                        input_variables=prompt_data.get('input_variables', [])
+                    )
+                else:
+                    # String prompt
+                    prompts_dict[key] = prompt_data['template']
+            else:
+                # Backward compatibility with old format
+                prompts_dict[key] = prompt_data if isinstance(prompt_data, str) else str(prompt_data)
+
+        return prompts_dict
