@@ -111,65 +111,6 @@ class MapReducePipelineFactory:
         """Get the class for a dataset type."""
         return cls._pipeline_registry.get(dataset)
 
-    # Convenience methods for backward compatibility
-    @classmethod
-    def create_financebench_pipeline(cls,
-                                   llm: Any,
-                                   prompts_dict: Dict[str, Any],
-                                   format_type: str = "json",
-                                   pdf_parser: str = "marker",
-                                   **kwargs) -> BaseMapReduceQA:
-        """
-        Convenience method to create a FinanceBench pipeline.
-
-        Args:
-            llm: Language model instance
-            prompts_dict: Dictionary containing prompt templates
-            format_type: Output format type
-            pdf_parser: PDF parsing method
-            **kwargs: Additional configuration parameters
-
-        Returns:
-            Configured FinanceBench pipeline
-        """
-        return cls.create_pipeline(
-            dataset='financebench',
-            format_type=format_type,
-            llm=llm,
-            prompts_dict=prompts_dict,
-            pdf_parser=pdf_parser,
-            **kwargs
-        )
-
-    @classmethod
-    def create_finqa_pipeline(cls,
-                            llm: Any,
-                            prompts_dict: Dict[str, Any],
-                            doc_dir: str,
-                            format_type: str = "json",
-                            **kwargs) -> BaseMapReduceQA:
-        """
-        Convenience method to create a FinQA pipeline.
-
-        Args:
-            llm: Language model instance
-            prompts_dict: Dictionary containing prompt templates
-            doc_dir: Directory containing FinQA markdown documents
-            format_type: Output format type
-            **kwargs: Additional configuration parameters
-
-        Returns:
-            Configured FinQA pipeline
-        """
-        return cls.create_pipeline(
-            dataset='finqa',
-            format_type=format_type,
-            llm=llm,
-            prompts_dict=prompts_dict,
-            doc_dir=doc_dir,
-            **kwargs
-        )
-
     @classmethod
     def get_pipeline_info(cls, dataset: str, format_type: str = "json") -> Dict[str, Union[str, List[str]]]:
         """
