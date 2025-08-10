@@ -1,5 +1,5 @@
 import re
-from typing import Dict, List, Any, Union, Optional, Tuple
+from typing import Dict, List, Any, Optional, Tuple
 from output_formatter import OutputFormatter
 
 
@@ -240,7 +240,7 @@ class HybridFormatter(OutputFormatter):
         config["approach"] = "Hybrid MapReduce (Text Map + JSON Reduce)"
         config["score_threshold"] = self.score_threshold
 
-        if hasattr(self.question_improvement_llm, 'get_model_name'):
+        if self.question_improvement_llm and hasattr(self.question_improvement_llm, 'get_model_name'):
             config["question_improvement_llm"] = {
                 "model_name": self.question_improvement_llm.get_model_name(),
                 "temperature": self.question_improvement_llm.get_temperature() if hasattr(self.question_improvement_llm, 'get_temperature') else None,

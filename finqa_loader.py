@@ -2,7 +2,7 @@ import json
 import os
 from typing import Dict, List, Any, Tuple, Optional
 from dataset_loader import DatasetLoader
-from utils import load_markdown_chunk
+from utils import load_document_chunk
 
 
 def load_finqa_data(json_path: str, num_samples: Optional[int] = None) -> List[Dict[str, Any]]:
@@ -86,7 +86,15 @@ class FinQALoader(DatasetLoader):
         """
         doc_name = qa_pair["doc_name"]
         markdown_file = os.path.join(self.doc_dir, doc_name)
-        return load_markdown_chunk(markdown_file, chunk_size, chunk_overlap)
+        documents, token_count = load_document_chunk(markdown_file, chunk_size, chunk_overlap, method="markdown")
+
+        # Ensure we return proper types as expected by the interface
+        if documents is None:
+            documents = []
+        if token_count is None:
+            token_count = 0
+
+        return documents, token_count
 
     def get_document_identifier(self, qa_pair: Dict[str, Any]) -> str:
         """Get document name for display."""

@@ -688,13 +688,89 @@ def num_tokens_from_string(string: str, encoding_name: str) -> int:
     return num_tokens
 
 
-def _get_pdf_cache_path(pdf_file, method, chunk_size, chunk_overlap):
+def _resolve_document_path(document_file):
     """
-    Generate a cache file path for PDF parsing results based on file content and parameters.
+    Resolve a document file input to a valid absolute path.
+
+    Handles multiple input formats:
+    - Document name only (e.g., "APPLE_2020") - searches for .pdf and .md files
+    - Full path (e.g., "/path/to/APPLE_2020.pdf") - validates existence
+    - Relative path - converts to absolute and validates
+
+    Search locations for document names:
+    - Current directory
+    - ../financebench/data/ (for FinanceBench PDFs)
+    - ../edgartools_finqa/ (for FinQA markdown files)
 
     Args:
-        pdf_file (str): Path to the PDF file
-        method (str): PDF parsing method used
+        document_file (str): Document name, relative path, or absolute path
+
+    Returns:
+        Path: Absolute path to the resolved document file
+
+    Raises:
+        FileNotFoundError: If document cannot be found in any search location
+    """
+    document_path = Path(document_file)
+
+    # If it's already an absolute path, just validate it exists
+    if document_path.is_absolute():
+        if document_path.exists():
+            return document_path
+        else:
+            raise FileNotFoundError(f"Document not found: {document_file}")
+
+    # If it has an extension and exists relative to current dir, use it
+    if document_path.suffix and document_path.exists():
+        return document_path.resolve()
+
+    # If it's just a name without extension, search for it
+    if not document_path.suffix:
+        search_locations = [
+            Path.cwd(),  # Current directory
+            Path("../financebench/pdfs"),  # FinanceBench PDFs
+            Path("../edgartools_finqa"),   # FinQA markdown files
+        ]
+
+        # Try both .pdf and .md extensions
+        extensions = ['.pdf', '.md', '.markdown']
+
+        for location in search_locations:
+            if location.exists():
+                for ext in extensions:
+                    candidate = location / f"{document_file}{ext}"
+                    if candidate.exists():
+                        return candidate.resolve()
+
+    # If it has an extension, search in known locations
+    if document_path.suffix:
+        search_locations = [
+            Path.cwd(),
+            Path("../financebench/pdfs"),
+            Path("../edgartools_finqa"),
+        ]
+
+        for location in search_locations:
+            if location.exists():
+                candidate = location / document_path.name
+                if candidate.exists():
+                    return candidate.resolve()
+
+    # Not found anywhere
+    raise FileNotFoundError(
+        f"Document '{document_file}' not found. Searched in: current directory, "
+        f"../financebench/data, ../edgartools_finqa. "
+        f"Please provide either a valid document name (e.g., 'APPLE_2020') or full path."
+    )
+
+
+def _get_document_cache_path(document_file, method, chunk_size, chunk_overlap):
+    """
+    Generate a cache file path for document parsing results based on file content and parameters.
+
+    Args:
+        document_file (str or Path): Path to the document file (PDF or Markdown)
+        method (str): Document parsing method used
         chunk_size (int): Chunk size parameter
         chunk_overlap (int): Chunk overlap parameter
 
@@ -702,29 +778,31 @@ def _get_pdf_cache_path(pdf_file, method, chunk_size, chunk_overlap):
         Path: Path to the cache file
     """
     # Create a hash of the file content + parameters for cache key
-    pdf_path = Path(pdf_file)
+    document_path = Path(document_file)
 
     # Get file modification time and size for cache validity
     try:
-        stat = pdf_path.stat()
+        stat = document_path.stat()
         file_info = f"{stat.st_mtime}_{stat.st_size}"
     except (OSError, FileNotFoundError):
         file_info = "unknown"
 
     # Create hash of filename, method, parameters, and file info
-    cache_key = f"{pdf_path.name}_{method}_{chunk_size}_{chunk_overlap}_{file_info}"
+    cache_key = f"{document_path.name}_{method}_{chunk_size}_{chunk_overlap}_{file_info}"
     cache_hash = hashlib.md5(cache_key.encode()).hexdigest()
 
-    # Create cache directory structure
-    cache_dir = Path("pdf_cache") / method
+    # Create cache directory structure - use document_cache instead of pdf_cache
+    cache_dir = Path("document_cache") / method
     cache_dir.mkdir(parents=True, exist_ok=True)
 
-    return cache_dir / f"{pdf_path.stem}_{cache_hash}.pkl"
+    return cache_dir / f"{document_path.stem}_{cache_hash}.pkl"
 
 
-def _save_pdf_cache(cache_path, documents, token_count):
+
+
+def _save_document_cache(cache_path, documents, token_count):
     """
-    Save PDF parsing results to cache.
+    Save document parsing results to cache.
 
     Args:
         cache_path (Path): Path to save the cache file
@@ -741,15 +819,15 @@ def _save_pdf_cache(cache_path, documents, token_count):
         with open(cache_path, 'wb') as f:
             pickle.dump(cache_data, f)
 
-        # print(f"Saved PDF parsing results to cache: {cache_path}")
+        # print(f"Saved document parsing results to cache: {cache_path}")
 
     except Exception as e:
-        print(f"Warning: Failed to save PDF cache: {e}")
+        print(f"Warning: Failed to save document cache: {e}")
 
 
-def _load_pdf_cache(cache_path):
+def _load_document_cache(cache_path):
     """
-    Load PDF parsing results from cache.
+    Load document parsing results from cache.
 
     Args:
         cache_path (Path): Path to the cache file
@@ -767,12 +845,14 @@ def _load_pdf_cache(cache_path):
         documents = cache_data.get('documents', [])
         token_count = cache_data.get('token_count', 0)
 
-        print(f"Loaded PDF parsing results from cache: {cache_path}")
+        print(f"Loaded document parsing results from cache: {cache_path}")
         return documents, token_count
 
     except Exception as e:
-        print(f"Warning: Failed to load PDF cache: {e}")
+        print(f"Warning: Failed to load document cache: {e}")
         return None, None
+
+
 
 
 def _marker_parser(pdf_file, force_reparse=False):
@@ -781,45 +861,49 @@ def _marker_parser(pdf_file, force_reparse=False):
     Checks if the PDF file is from financeBench or has been parsed already.
 
     Args:
-        pdf_file (str): Path to the PDF file to be processed
+        pdf_file (str or Path): Path to the PDF file to be processed (should be absolute path)
         force_reparse (bool): Whether to reparse the PDF even if markdown already exists
 
     Returns:
-        str: Path to the generated markdown file
+        str: Path to the generated markdown file, or None if parsing failed
     """
-    # Get PDF filename without extension
+    # Ensure we have a Path object and get the document name
     pdf_path = Path(pdf_file)
     pdf_name = pdf_path.stem
 
     # Check if pdf is already parsed from financeBench
-    markdown_path = ".." / Path("marker_financebench") / pdf_name / f"{pdf_name}.md"
-    if not force_reparse and markdown_path.exists():
-        # print(f"Found existing financeBench markdown for {pdf_name}: {markdown_path}")
-        return str(markdown_path)
+    financebench_markdown_path = Path("../marker_financebench") / pdf_name / f"{pdf_name}.md"
+    if not force_reparse and financebench_markdown_path.exists():
+        # print(f"Found existing financeBench markdown for {pdf_name}: {financebench_markdown_path}")
+        return str(financebench_markdown_path)
 
-    # Create output directory if it doesn't exist
-    markdown_path = Path("marker") / pdf_name
-    markdown_path.mkdir(parents=True, exist_ok=True)
-    if not force_reparse and markdown_path.exists():
-        print(f"Found existing marker markdown for {pdf_name}: {markdown_path}")
-        return str(markdown_path)
+    # Check local marker output directory
+    local_markdown_dir = Path("marker") / pdf_name
+    local_markdown_file = local_markdown_dir / f"{pdf_name}.md"
 
-    # Run marker CLI command
+    if not force_reparse and local_markdown_file.exists():
+        print(f"Found existing marker markdown for {pdf_name}: {local_markdown_file}")
+        return str(local_markdown_file)
+
+    # Create output directory for this document
+    local_markdown_dir.mkdir(parents=True, exist_ok=True)
+
+    # Run marker CLI command with absolute path
     try:
         output_dir = Path("marker")
-        print(f"Parsing {pdf_file} with marker...")
-        cmd = ["marker_single", pdf_file, "--output_dir", str(output_dir), "--output_format", "markdown", "--format_lines"]
+        print(f"Parsing {pdf_path} with marker...")
+        cmd = ["marker_single", str(pdf_path), "--output_dir", str(output_dir), "--output_format", "markdown", "--format_lines"]
         subprocess.run(cmd, check=True)
 
         # Check if markdown was generated
-        if markdown_path.exists():
-            print(f"Successfully parsed {pdf_file}. Markdown saved to {markdown_path}")
-            return str(markdown_path)
+        if local_markdown_file.exists():
+            print(f"Successfully parsed {pdf_path}. Markdown saved to {local_markdown_file}")
+            return str(local_markdown_file)
         else:
-            print(f"Marker didn't generate markdown for {pdf_file}")
+            print(f"Marker didn't generate markdown for {pdf_path}")
             return None
     except Exception as e:
-        print(f"Error parsing {pdf_file} with marker: {e}")
+        print(f"Error parsing {pdf_path} with marker: {e}")
         return None
 
 
@@ -847,31 +931,122 @@ def _process_documents(documents, chunk_size, chunk_overlap, use_tiktoken=False)
     return split_documents, token_count
 
 
-def load_pdf_chunk(pdf_file, chunk_size, chunk_overlap, method, force_reparse=False):
+def load_document_chunk(document_file, chunk_size, chunk_overlap, method=None, force_reparse=False):
     """
-    The function loads a pdf file and makes it ready for querying
+    Load and chunk a document file (PDF or Markdown) for processing.
+
+    Unified interface that auto-detects file type and handles path resolution.
+    Supports both document names (e.g., "APPLE_2020") and full paths.
 
     Args:
-        pdf_file (str): name of the pdf file to be processed
-        chunk_size (int): size of each chunk
-        chunk_overlap (int): overlap between chunks
-        method (str): method to use for PDF parsing
-        force_reparse (bool): whether to bypass cache and reparse the PDF
+        document_file (str): Document name, relative path, or absolute path
+        chunk_size (int): Size of each chunk (must be > 0)
+        chunk_overlap (int): Overlap between chunks (must be >= 0 and < chunk_size)
+        method (str, optional): Parsing method. Auto-detected from file extension if None.
+                               For PDFs: "marker", "pypdf", "pymu", "unstructured", "default"
+                               For Markdown: "markdown"
+        force_reparse (bool): Whether to bypass cache and reparse the document
 
     Returns:
-        pages (list): list of all the pages in the pdf
+        tuple: (list of Document objects, token count)
+
+    Examples:
+        # Document name - will search for APPLE_2020.pdf or APPLE_2020.md
+        load_document_chunk("APPLE_2020", 1000, 200)
+
+        # Full path
+        load_document_chunk("/path/to/document.pdf", 1000, 200, method="marker")
+
+        # Markdown file
+        load_document_chunk("report.md", 1000, 200)
     """
+    # Validate parameters
+    if not document_file or not document_file.strip():
+        raise ValueError("document_file cannot be empty")
+    if chunk_size <= 0:
+        raise ValueError("chunk_size must be greater than 0")
+    if chunk_overlap < 0:
+        raise ValueError("chunk_overlap must be >= 0")
+    if chunk_overlap >= chunk_size:
+        raise ValueError("chunk_overlap must be less than chunk_size")
+
+    # Resolve document path
+    try:
+        resolved_path = _resolve_document_path(document_file)
+    except FileNotFoundError as e:
+        print(f"Error: {e}")
+        return [], 0
+
+    # Auto-detect method from file extension if not specified
+    if method is None:
+        extension = resolved_path.suffix.lower()
+        if extension == '.pdf':
+            method = "marker"  # Default to marker for PDFs
+        elif extension in ['.md', '.markdown']:
+            method = "markdown"
+        else:
+            raise ValueError(f"Unsupported file type: {extension}. Supported: .pdf, .md, .markdown")
+
+    # Validate method parameter
+    valid_pdf_methods = ["marker", "pypdf", "pymu", "unstructured", "default"]
+    valid_markdown_methods = ["markdown"]
+    extension = resolved_path.suffix.lower()
+
+    if extension == '.pdf' and method not in valid_pdf_methods:
+        raise ValueError(f"Invalid method '{method}' for PDF files. Valid methods: {valid_pdf_methods}")
+    elif extension in ['.md', '.markdown'] and method not in valid_markdown_methods:
+        raise ValueError(f"Invalid method '{method}' for Markdown files. Valid methods: {valid_markdown_methods}")
+
+    # Handle markdown files
+    if method == "markdown" or resolved_path.suffix.lower() in ['.md', '.markdown']:
+        return _load_markdown_document(resolved_path, chunk_size, chunk_overlap, force_reparse)
+
+    # Handle PDF files
+    return _load_pdf_document(resolved_path, chunk_size, chunk_overlap, method, force_reparse)
+
+
+def _load_markdown_document(markdown_path, chunk_size, chunk_overlap, force_reparse=False):
+    """Load and process a markdown document."""
+    # Check cache first (unless forcing reparse)
+    if not force_reparse:
+        cache_path = _get_document_cache_path(markdown_path, "markdown", chunk_size, chunk_overlap)
+        cached_documents, cached_token_count = _load_document_cache(cache_path)
+        if cached_documents is not None:
+            return cached_documents, cached_token_count
+
+    try:
+        with open(markdown_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+
+        documents = [Document(page_content=content, metadata={"source": str(markdown_path)})]
+        split_documents, token_count = _process_documents(documents, chunk_size, chunk_overlap, use_tiktoken=True)
+
+        # Save to cache
+        cache_path = _get_document_cache_path(markdown_path, "markdown", chunk_size, chunk_overlap)
+        _save_document_cache(cache_path, split_documents, token_count)
+
+        return split_documents, token_count
+
+    except FileNotFoundError:
+        print(f"Warning: File not found: {markdown_path}")
+        return [], 0
+    except Exception as e:
+        print(f"Error loading markdown file {markdown_path}: {e}")
+        return [], 0
+
+
+def _load_pdf_document(pdf_path, chunk_size, chunk_overlap, method, force_reparse=False):
+    """Load and process a PDF document using the specified method."""
     documents = None
 
     # Handle marker method separately due to its unique workflow
     if method == "marker":
-
         # Try parsing with marker
-        markdown_path = _marker_parser(pdf_file)
+        markdown_path = _marker_parser(str(pdf_path))
         if markdown_path:
             with open(markdown_path, 'r', encoding='utf-8') as f:
                 content = f.read()
-            documents = [Document(page_content=content, metadata={"source": pdf_file})]
+            documents = [Document(page_content=content, metadata={"source": str(pdf_path)})]
             return _process_documents(documents, chunk_size, chunk_overlap, use_tiktoken=True)
 
         # Fallback to PDFMinerLoader
@@ -880,62 +1055,34 @@ def load_pdf_chunk(pdf_file, chunk_size, chunk_overlap, method, force_reparse=Fa
 
     # Check cache for non-marker methods (only if not forcing reparse)
     if not force_reparse:
-        cache_path = _get_pdf_cache_path(pdf_file, method, chunk_size, chunk_overlap)
-        cached_documents, cached_token_count = _load_pdf_cache(cache_path)
+        cache_path = _get_document_cache_path(pdf_path, method, chunk_size, chunk_overlap)
+        cached_documents, cached_token_count = _load_document_cache(cache_path)
 
         if cached_documents is not None:
             return cached_documents, cached_token_count
 
     # Handle all other loader methods
+    pdf_str = str(pdf_path)
     if method == "pypdf":
-        # Try to find the correct PDF file path, similar to marker method
-        # pdf_path = Path(f"{pdf_file}.pdf")
-        # if not pdf_path.exists():
-
-        loader = PyPDFLoader(pdf_file)
+        loader = PyPDFLoader(pdf_str)
     elif method == "pymu":
-        loader = PyMuPDFLoader(pdf_file)
+        loader = PyMuPDFLoader(pdf_str)
     elif method == "unstructured":
-        loader = UnstructuredPDFLoader(pdf_file, mode="elements", strategy="hi_res")
+        loader = UnstructuredPDFLoader(pdf_str, mode="elements", strategy="hi_res")
     else:  # default case (including fallback from marker)
-        loader = PDFMinerLoader(pdf_file)
+        loader = PDFMinerLoader(pdf_str)
 
     documents = loader.load()
     split_documents, token_count = _process_documents(documents, chunk_size, chunk_overlap, use_tiktoken=True)
 
     # Save to cache for future use (except for marker method which has its own caching)
     if method != "marker":
-        cache_path = _get_pdf_cache_path(pdf_file, method, chunk_size, chunk_overlap)
-        _save_pdf_cache(cache_path, split_documents, token_count)
+        cache_path = _get_document_cache_path(pdf_path, method, chunk_size, chunk_overlap)
+        _save_document_cache(cache_path, split_documents, token_count)
 
     return split_documents, token_count
 
 
-def load_markdown_chunk(markdown_file, chunk_size, chunk_overlap):
-    """
-    Load and chunk a markdown file for FinQA processing
-
-    Args:
-        markdown_file (str): Path to the markdown file
-        chunk_size (int): Size of each chunk
-        chunk_overlap (int): Overlap between chunks
-
-    Returns:
-        tuple: (list of Document objects, token count)
-    """
-    try:
-        with open(markdown_file, 'r', encoding='utf-8') as f:
-            content = f.read()
-
-        documents = [Document(page_content=content, metadata={"source": markdown_file})]
-        return _process_documents(documents, chunk_size, chunk_overlap, use_tiktoken=True)
-
-    except FileNotFoundError:
-        print(f"Warning: File not found: {markdown_file}")
-        return [], 0
-    except Exception as e:
-        print(f"Error loading markdown file {markdown_file}: {e}")
-        return [], 0
 
 
 # ===== EVALUATION STATISTICS FUNCTIONS =====

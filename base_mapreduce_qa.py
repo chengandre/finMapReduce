@@ -135,26 +135,26 @@ class BaseMapReduceQA(ABC):
     def load_document_chunks(self, qa_pair: Dict[str, Any]) -> Tuple[List[Any], int]:
         """
         Default implementation for loading PDF chunks.
-        
+
         Args:
             qa_pair: Dictionary containing 'doc_name' key
-            
+
         Returns:
             Tuple of (list of document chunks, total token count)
         """
-        from utils import load_pdf_chunk
-        
+        from utils import load_document_chunk
+
         doc_name = qa_pair["doc_name"]
         pdf_parser = getattr(self, 'pdf_parser', 'marker')
-        
-        documents, token_count = load_pdf_chunk(
+
+        documents, token_count = load_document_chunk(
             doc_name,
             self.chunk_size,
             self.chunk_overlap,
             method=pdf_parser
         )
 
-        # Handle the case where load_pdf_chunk returns None values
+        # Handle the case where load_document_chunk returns None values
         if documents is None or token_count is None:
             return [], 0
 

@@ -1,7 +1,7 @@
 import json
 from typing import Dict, List, Any, Tuple, Optional
 from dataset_loader import DatasetLoader
-from utils import load_pdf_chunk
+from utils import load_document_chunk
 
 
 def load_financebench_data(jsonl_path: str, num_samples: Optional[int] = None) -> List[Dict[str, Any]]:
@@ -87,7 +87,7 @@ class FinanceBenchLoader(DatasetLoader):
             Tuple of (list of document chunks, total token count)
         """
         doc_name = qa_pair["doc_name"]
-        documents, token_count = load_pdf_chunk(
+        documents, token_count = load_document_chunk(
             doc_name,
             chunk_size,
             chunk_overlap,
