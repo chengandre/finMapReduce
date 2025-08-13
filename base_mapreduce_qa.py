@@ -6,7 +6,6 @@ import time
 import json
 import os
 from datetime import datetime
-from pathlib import Path
 
 
 class BaseMapReduceQA(ABC):
@@ -197,7 +196,10 @@ class BaseMapReduceQA(ABC):
             return self._handle_processing_error(qa_pair, "No results from map phase")
 
         # Step 3: Preprocess/filter results
+        chunks_before_filtering = len(map_results)
+        score_analysis = self._extract_score_analysis(map_results)
         filtered_results = self.preprocess_map_results(map_results)
+        chunks_after_filtering = len(filtered_results)
 
         if not filtered_results:
             return self._handle_processing_error(qa_pair, "No results after preprocessing")
@@ -210,8 +212,9 @@ class BaseMapReduceQA(ABC):
         qa_pair.update(parsed_results)
 
         # Step 6: Store token statistics and timing
+        filtering_stats = self._calculate_filtering_stats(chunks_before_filtering, chunks_after_filtering, score_analysis)
         qa_pair["token_stats"] = self._compile_token_stats(
-            len(docs), map_tokens, reduce_tokens, map_time, reduce_time
+            len(docs), map_tokens, reduce_tokens, map_time, reduce_time, filtering_stats
         )
 
         return qa_pair
@@ -394,9 +397,9 @@ class BaseMapReduceQA(ABC):
 
         return {"input_tokens": input_tokens, "output_tokens": output_tokens, "cache_read_tokens": cache_read_tokens}
 
-    def _compile_token_stats(self, num_docs: int, map_tokens: Dict, reduce_tokens: Dict, map_time: float, reduce_time: float) -> Dict:
-        """Compile token statistics and timing."""
-        return {
+    def _compile_token_stats(self, num_docs: int, map_tokens: Dict, reduce_tokens: Dict, map_time: float, reduce_time: float, filtering_stats: Optional[Dict] = None) -> Dict:
+        """Compile token statistics, timing, and filtering stats."""
+        stats = {
             "len_docs": num_docs,
             "map_phase": map_tokens,
             "reduce_phase": reduce_tokens,
@@ -411,6 +414,11 @@ class BaseMapReduceQA(ABC):
                 "cache_read_tokens": map_tokens.get("cache_read_tokens", 0) + reduce_tokens.get("cache_read_tokens", 0)
             }
         }
+
+        if filtering_stats:
+            stats["filtering_stats"] = filtering_stats
+
+        return stats
 
     def _handle_document_error(self, qa_pair: Dict[str, Any], error_msg: str) -> Dict[str, Any]:
         """Handle document loading errors."""
@@ -441,7 +449,12 @@ class BaseMapReduceQA(ABC):
                 "reduce_phase_time": 0.0,
                 "total_time": 0.0
             },
-            "total": {"input_tokens": 0, "output_tokens": 0, "cache_read_tokens": 0}
+            "total": {"input_tokens": 0, "output_tokens": 0, "cache_read_tokens": 0},
+            "filtering_stats": {
+                "chunks_before_filtering": 0,
+                "chunks_after_filtering": 0,
+                "filtering_retention_rate": 0.0
+            }
         }
 
     def _print_document_info(self, qa_data: List[Dict[str, Any]]):
@@ -473,6 +486,58 @@ class BaseMapReduceQA(ABC):
             judge_prompt_key=self.get_judge_prompt_key(),
             formatter_type=formatter_type
         )
+
+    def _extract_score_analysis(self, map_results: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """Extract score distribution from map results if available."""
+        import re
+
+        scores = []
+        score_threshold = None
+
+        # Check if this pipeline uses score-based filtering
+        if hasattr(self, 'output_formatter'):
+            formatter = getattr(self, 'output_formatter', None)
+            if formatter and hasattr(formatter, 'score_threshold'):
+                score_threshold = getattr(formatter, 'score_threshold', None)
+
+        for result in map_results:
+            try:
+                content = result.get('content', '')
+                if "Score:" in content:
+                    score_match = re.search(r'Score:\s*(\d+)', content)
+                    if score_match:
+                        score = int(score_match.group(1))
+                        scores.append(score)
+            except Exception:
+                pass  # Ignore score extraction errors
+
+        if scores:
+            return {
+                "score_distribution": {
+                    "scores": scores,
+                    "count": len(scores),
+                    "min": min(scores),
+                    "max": max(scores),
+                    "avg": sum(scores) / len(scores)
+                },
+                "score_threshold_used": score_threshold
+            }
+
+        return {}
+
+    def _calculate_filtering_stats(self, chunks_before: int, chunks_after: int, score_analysis: Optional[Dict] = None) -> Dict[str, Any]:
+        """Calculate filtering statistics for a single QA pair."""
+        retention_rate = chunks_after / chunks_before if chunks_before > 0 else 0.0
+        stats = {
+            "chunks_before_filtering": chunks_before,
+            "chunks_after_filtering": chunks_after,
+            "filtering_retention_rate": retention_rate
+        }
+
+        if score_analysis:
+            stats.update(score_analysis)
+
+        return stats
 
     def _calculate_timing_averages(self, qa_data: List[Dict[str, Any]]) -> Dict[str, float]:
         """Calculate average and median timing statistics from all QA pairs."""
@@ -508,6 +573,61 @@ class BaseMapReduceQA(ABC):
             "samples_with_timing": len(total_times)
         }
 
+    def _calculate_filtering_effectiveness(self, qa_data: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """Calculate dataset-level filtering effectiveness statistics."""
+        import statistics
+
+        retention_rates = []
+        total_chunks_processed = 0
+        total_chunks_retained = 0
+        all_scores = []
+        score_threshold_used = None
+
+        for qa_pair in qa_data:
+            token_stats = qa_pair.get('token_stats', {})
+            filtering_stats = token_stats.get('filtering_stats', {})
+
+            if filtering_stats:
+                chunks_before = filtering_stats.get('chunks_before_filtering', 0)
+                chunks_after = filtering_stats.get('chunks_after_filtering', 0)
+                retention_rate = filtering_stats.get('filtering_retention_rate', 0.0)
+
+                if chunks_before > 0:
+                    retention_rates.append(retention_rate)
+                    total_chunks_processed += chunks_before
+                    total_chunks_retained += chunks_after
+
+                # Collect score data if available
+                score_distribution = filtering_stats.get('score_distribution', {})
+                if score_distribution and 'scores' in score_distribution:
+                    all_scores.extend(score_distribution['scores'])
+
+                # Get score threshold (should be consistent across QA pairs)
+                if score_threshold_used is None:
+                    score_threshold_used = filtering_stats.get('score_threshold_used')
+
+        effectiveness = {
+            "dataset_avg_retention_rate": sum(retention_rates) / len(retention_rates) if retention_rates else 0.0,
+            "dataset_median_retention_rate": statistics.median(retention_rates) if retention_rates else 0.0,
+            "total_chunks_processed": total_chunks_processed,
+            "total_chunks_retained": total_chunks_retained
+        }
+
+        # Add score analysis if scores were found
+        if all_scores:
+            effectiveness["score_distribution"] = {
+                "total_scores": len(all_scores),
+                "min": min(all_scores),
+                "max": max(all_scores),
+                "avg": sum(all_scores) / len(all_scores),
+                "median": statistics.median(all_scores)
+            }
+
+        if score_threshold_used is not None:
+            effectiveness["score_threshold_used"] = score_threshold_used
+
+        return effectiveness
+
     def _compile_results(self, qa_data: List[Dict], evaluation_results: Dict,
                         model_name: str, judge_model_name: str, process_time: float, **kwargs) -> Dict:
         """Compile final results dictionary."""
@@ -527,6 +647,9 @@ class BaseMapReduceQA(ABC):
 
         # Calculate timing averages
         timing_averages = self._calculate_timing_averages(qa_data)
+
+        # Calculate filtering effectiveness
+        filtering_effectiveness = self._calculate_filtering_effectiveness(qa_data)
 
         # Check if question_type exists in data
         has_question_type = any('question_type' in qa for qa in qa_data)
@@ -564,6 +687,7 @@ class BaseMapReduceQA(ABC):
             "token_usage_summary": token_summary,
             "phase_token_totals": phase_token_totals,
             "timing_summary": timing_averages,
+            "filtering_effectiveness": filtering_effectiveness,
             "question_improvement_tokens": question_improvement_tokens,
             "qa_data": qa_data,
             "evaluations": {

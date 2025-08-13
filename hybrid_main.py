@@ -87,8 +87,8 @@ def main():
     )
 
     judge = create_rate_limited_llm(
-        model_name="gpt-5-mini",
-        temperature=0.0,
+        model_name="gpt-5-nano",
+        temperature=1.0,
         max_tokens=8192,
         provider="openai",
         api_key_env=args.key,
