@@ -1,5 +1,5 @@
 from factory import MapReducePipelineFactory
-from utils import RateLimitedGPT, load_prompt_set
+from utils import create_rate_limited_llm, load_prompt_set, RateLimitConfig
 import argparse
 import os
 import shutil
@@ -53,26 +53,37 @@ def main():
 
     args = parser.parse_args()
 
-    config = {
-        'requests_per_minute': args.requests_per_minute,
-        'tokens_per_minute': args.tokens_per_minute,
-        'request_burst_size': args.request_burst_size
-    }
+    rate_config = RateLimitConfig(
+        requests_per_minute=args.requests_per_minute,
+        tokens_per_minute=args.tokens_per_minute,
+        request_burst_size=args.request_burst_size
+    )
 
-    judge_config = {
-        'requests_per_minute': 20,
-        'tokens_per_minute': 4000000,
-        'request_burst_size': 4
-    }
+    judge_rate_config = RateLimitConfig(
+        requests_per_minute=20,
+        tokens_per_minute=4000000,
+        request_burst_size=4
+    )
 
     prompts_dict = load_prompt_set(args.prompt)
 
-    llm = RateLimitedGPT(model_name=args.model_name, temperature=args.temperature, max_tokens=args.max_tokens, provider=args.provider, key=args.key, rate_limit_config=config)
-    judge = RateLimitedGPT(model_name="deepseek/deepseek-r1-0528:free",
-                           temperature=0.0,
-                           max_tokens=8192,
-                           provider="openrouter",
-                           rate_limit_config=judge_config)
+    llm = create_rate_limited_llm(
+        model_name=args.model_name,
+        temperature=args.temperature,
+        max_tokens=args.max_tokens,
+        provider=args.provider,
+        api_key_env=args.key,
+        rate_limit_config=rate_config,
+        parse_json=True
+    )
+    judge = create_rate_limited_llm(
+        model_name="deepseek/deepseek-r1-0528:free",
+        temperature=0.0,
+        max_tokens=8192,
+        provider="openrouter",
+        rate_limit_config=judge_rate_config,
+        parse_json=True
+    )
 
     print(f"\nCONFIGURATION:")
     print(f"  Dataset: financebench")

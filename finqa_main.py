@@ -1,5 +1,5 @@
 from factory import MapReducePipelineFactory
-from utils import RateLimitedGPT, load_prompt_set
+from utils import create_rate_limited_llm, load_prompt_set, RateLimitConfig
 import argparse
 import os
 import shutil
@@ -53,15 +53,23 @@ def main():
 
     args = parser.parse_args()
 
-    config = {
-        'requests_per_minute': args.requests_per_minute,
-        'tokens_per_minute': args.tokens_per_minute,
-        'request_burst_size': args.request_burst_size
-    }
+    rate_config = RateLimitConfig(
+        requests_per_minute=args.requests_per_minute,
+        tokens_per_minute=args.tokens_per_minute,
+        request_burst_size=args.request_burst_size
+    )
 
     prompts_dict = load_prompt_set(args.prompt)
 
-    llm = RateLimitedGPT(model_name=args.model_name, temperature=args.temperature, max_tokens=args.max_tokens, provider=args.provider, key=args.key, rate_limit_config=config)
+    llm = create_rate_limited_llm(
+        model_name=args.model_name,
+        temperature=args.temperature,
+        max_tokens=args.max_tokens,
+        provider=args.provider,
+        api_key_env=args.key,
+        rate_limit_config=rate_config,
+        parse_json=True
+    )
 
     print(f"\nCONFIGURATION:")
     print(f"  Dataset: finqa")

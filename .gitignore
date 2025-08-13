@@ -7,3 +7,6 @@ __pycache__/
 *last_year*
 *.pkl
 .DS_Store
+*.pdf
+*.eps
+*.txt

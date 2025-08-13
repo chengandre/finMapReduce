@@ -1,5 +1,5 @@
 from factory import MapReducePipelineFactory
-from utils import RateLimitedGPT, RateLimitedRetryLLM, load_prompt_set
+from utils import create_rate_limited_llm, load_prompt_set, RateLimitConfig
 import argparse
 import os
 import shutil
@@ -30,7 +30,7 @@ def main():
                       help='Maximum number of tokens for the LLM')
     parser.add_argument('--provider', type=str, default="openai",
                       help='Provider of the LLM')
-    parser.add_argument('--max_concurrent_qa', type=int, default=40,
+    parser.add_argument('--max_concurrent_qa', type=int, default=150,
                       help='Maximum number of QA pairs to process concurrently')
     parser.add_argument('--key', type=str, default=None,
                       help='API key selector: "self" uses SELF_OPENAI_API_KEY, otherwise uses OPENAI_API_KEY')
@@ -51,46 +51,49 @@ def main():
 
     args = parser.parse_args()
 
-    config = {
-        'requests_per_minute': args.requests_per_minute,
-        'tokens_per_minute': args.tokens_per_minute,
-        'request_burst_size': args.request_burst_size
-    }
+    rate_config = RateLimitConfig(
+        requests_per_minute=args.requests_per_minute,
+        tokens_per_minute=args.tokens_per_minute,
+        request_burst_size=args.request_burst_size
+    )
 
-    judge_config = {
-        'requests_per_minute': 20,
-        'tokens_per_minute': 4000000,
-        'request_burst_size': 4
-    }
+    judge_rate_config = RateLimitConfig(
+        requests_per_minute=20,
+        tokens_per_minute=4000000,
+        request_burst_size=4
+    )
 
     prompts_dict = load_prompt_set(args.prompt)
 
     # Create LLM instances for hybrid approach
-    map_llm = RateLimitedRetryLLM(
+    map_llm = create_rate_limited_llm(
         model_name=args.model_name,
         temperature=args.temperature,
         max_tokens=args.max_tokens,
         provider=args.provider,
-        key=args.key,
-        rate_limit_config=config
+        api_key_env=args.key,
+        rate_limit_config=rate_config,
+        parse_json=False
     )
 
-    reduce_llm = RateLimitedGPT(
+    reduce_llm = create_rate_limited_llm(
         model_name=args.model_name,
         temperature=args.temperature,
         max_tokens=args.max_tokens,
         provider=args.provider,
-        key=args.key,
-        rate_limit_config=config
+        api_key_env=args.key,
+        rate_limit_config=rate_config,
+        parse_json=True
     )
 
-    judge = RateLimitedGPT(
-        model_name="gpt-4o-mini",
+    judge = create_rate_limited_llm(
+        model_name="gpt-5-mini",
         temperature=0.0,
         max_tokens=8192,
         provider="openai",
-        key=args.key,
-        rate_limit_config=judge_config
+        api_key_env=args.key,
+        rate_limit_config=judge_rate_config,
+        parse_json=True
     )
 
     print(f"\nCONFIGURATION:")

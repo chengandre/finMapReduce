@@ -25,7 +25,7 @@ class JSONFormatter(OutputFormatter):
             Dictionary with 'json' and 'raw_response' keys
         """
         map_prompt = self.prompts_dict['map_prompt']
-        return self.map_llm(map_prompt, context=chunk.page_content, final_query=question)
+        return self.map_llm.invoke(map_prompt, context=chunk.page_content, final_query=question)
 
     def invoke_llm_reduce(self, formatted_results: Any, question: str) -> Any:
         """
@@ -39,7 +39,7 @@ class JSONFormatter(OutputFormatter):
             Dictionary with 'json' and 'raw_response' keys
         """
         reduce_prompt = self.prompts_dict['reduce_prompt']
-        return self.reduce_llm(reduce_prompt, map_results=formatted_results, final_query=question)
+        return self.reduce_llm.invoke(reduce_prompt, map_results=formatted_results, final_query=question)
 
     def preprocess_map_results(self, results: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """

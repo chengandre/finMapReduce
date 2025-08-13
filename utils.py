@@ -10,6 +10,7 @@ import uuid
 import logging
 import pickle
 import hashlib
+import yaml
 
 from pathlib import Path
 from pydantic import SecretStr
@@ -19,210 +20,130 @@ from langchain_openai import ChatOpenAI
 from langchain.text_splitter import CharacterTextSplitter, RecursiveCharacterTextSplitter
 from langchain_community.document_loaders import PyPDFLoader, PDFMinerLoader, PyMuPDFLoader, UnstructuredPDFLoader
 from langchain.prompts import load_prompt
-import yaml
+from typing import Optional, Dict, Any, Protocol, runtime_checkable
+from dataclasses import dataclass
 
 load_dotenv()
 
 # Suppress langchain text splitter warnings
 logging.getLogger("langchain_text_splitters.base").setLevel(logging.ERROR)
 
-class GPT:
-    def __init__(self, model_name, temperature, max_tokens, provider="openrouter", key=None):
-        """
-        Initialize an LLM wrapper for either OpenAI or OpenRouter
+# ============================================================================
+# Configuration and Data Classes
+# ============================================================================
 
-        Args:
-            model_name (str): The model to use
-            temperature (float): Temperature setting for generation
-            max_tokens (int): Maximum tokens for completion
-            provider (str): Either "openai" or "openrouter"
-            key (str): Key selector - if "self" and provider is not "openrouter", uses SELF_OPENAI_API_KEY, else OPENAI_API_KEY
-        """
-        self.model_name = model_name
-        self.temperature = temperature
-        self.max_tokens = max_tokens
-        self.provider = provider.lower()
-        self.key = key
+@dataclass
+class LLMConfig:
+    """Configuration for LLM models"""
+    model_name: str
+    temperature: float
+    max_tokens: int
+    provider: str = "openai"
+    api_key_env: Optional[str] = None
+    base_url: Optional[str] = None
 
-        # Configure based on provider
-        if provider == "openrouter":
-            api_key = SecretStr(os.getenv("OPENROUTER_API_KEY", ""))
-            base_url = "https://openrouter.ai/api/v1"
-        else:  # default to openai
-            if key == "self":
-                api_key = SecretStr(os.getenv("SELF_OPENAI_API_KEY", ""))
-            elif key == "elm":
-                api_key = SecretStr(os.getenv("ELM_OPENAI_API_KEY", ""))
-            else:
-                api_key = SecretStr(os.getenv("OPENAI_API_KEY", ""))
-            base_url = None
 
-        self.llm = ChatOpenAI(
-            model=model_name,
+@dataclass
+class RateLimitConfig:
+    """Configuration for rate limiting"""
+    requests_per_minute: int = 5000
+    tokens_per_minute: int = 4000000
+    request_burst_size: int = 500
+    token_burst_size: Optional[int] = None
+
+    def __post_init__(self):
+        if self.token_burst_size is None:
+            self.token_burst_size = int(self.tokens_per_minute / 60 * 2)
+
+
+# ============================================================================
+# Provider Factory
+# ============================================================================
+
+class LLMProviderFactory:
+    """Factory for creating configured LLM providers"""
+
+    @staticmethod
+    def create_provider(config: LLMConfig) -> ChatOpenAI:
+        """Create a configured LLM provider based on config"""
+        api_key, base_url = LLMProviderFactory._get_credentials(config)
+
+        return ChatOpenAI(
+            model=config.model_name,
             api_key=api_key,
-            temperature=temperature,
-            max_tokens=max_tokens,
+            temperature=config.temperature,
+            max_tokens=config.max_tokens,
             base_url=base_url,
             max_retries=50
         )
 
-        # Create directory for saving prompts if it doesn't exist
-        self.prompts_dir = Path("prompts_log")
-        self.prompts_dir.mkdir(exist_ok=True)
+    @staticmethod
+    def _get_credentials(config: LLMConfig) -> tuple[SecretStr, Optional[str]]:
+        """Get API credentials based on provider and key configuration"""
+        if config.provider.lower() == "openrouter":
+            api_key = SecretStr(os.getenv("OPENROUTER_API_KEY", ""))
+            base_url = config.base_url or "https://openrouter.ai/api/v1"
+        else:  # OpenAI
+            key_mapping = {
+                "self": "SELF_OPENAI_API_KEY",
+                "elm": "ELM_OPENAI_API_KEY",
+                None: "OPENAI_API_KEY"
+            }
+            env_var = key_mapping.get(config.api_key_env, "OPENAI_API_KEY")
+            api_key = SecretStr(os.getenv(env_var, ""))
+            base_url = config.base_url
 
-    def get_model_name(self):
-        """Get the model name."""
-        return self.model_name
+        return api_key, base_url
 
-    def get_temperature(self):
-        """Get the temperature setting."""
-        return self.temperature
 
-    def get_max_tokens(self):
-        """Get the max tokens setting."""
-        return self.max_tokens
+# ============================================================================
+# Token Estimation Strategy
+# ============================================================================
 
-    def get_provider(self):
-        """Get the provider setting."""
-        return self.provider
+class TokenEstimator:
+    """Strategy for estimating token usage"""
 
-    def get_key(self):
-        """Get the key setting."""
-        return self.key
-
-    def __call__(self, prompt, **kwargs):
-        max_retries = 50
-        base_delay = 2
-
-        # Generate unique ID for this prompt
-        prompt_id = str(uuid.uuid4())
-        prompt_file = self.prompts_dir / f"prompt_{prompt_id}.json"
-
-        # Save the prompt to file
-        prompt_data = {
-            "kwargs": kwargs,
-            "model": self.model_name,
-            "timestamp": time.time()
-        }
-
-        with open(prompt_file, "w", encoding="utf-8") as f:
-            json.dump(prompt_data, f, indent=2)
-
-        for attempt in range(max_retries):
-            try:
-                chain = prompt | self.llm
-                response = chain.invoke(kwargs)
-
-                parsed_json = self._parse_json(response)
-
-                # Success - delete the prompt file
-                if prompt_file.exists():
-                    prompt_file.unlink()
-
-                return {
-                    'json': parsed_json,
-                    'raw_response': response
-                }
-
-            except Exception as e:
-                error_str = str(e)
-
-                retryable_errors = [
-                    "Internal Server Error",
-                    "500",
-                    "502",
-                    "503",
-                    "504",
-                    "timeout",
-                    "connection",
-                    "rate limit",
-                    "too many requests",
-                    "json",
-                    "invalid json"
-                ]
-
-                is_retryable = any(error_type.lower() in error_str.lower() for error_type in retryable_errors)
-                is_retryable = True
-
-                if not is_retryable or attempt == max_retries - 1:
-                    # Keep the prompt file for analysis (don't delete it)
-                    raise e
-
-                delay = min(base_delay * (2 ** attempt), 60)
-                print(f"Error (attempt {attempt + 1}/{max_retries}): {error_str}")
-                # print(f"Error (attempt {attempt + 1}/{max_retries})")
-                # print(f"Retrying in {delay} seconds...")
-                time.sleep(delay)
-
-    def _parse_json(self, response):
+    @staticmethod
+    def estimate(text: str, max_tokens: Optional[int] = None) -> int:
         """
-        Parse JSON from the response, handling various formats including code blocks
+        Estimates total token usage for a request.
+
+        Args:
+            text: The prompt text
+            max_tokens: Maximum completion tokens (if specified)
+
+        Returns:
+            Estimated total tokens with 15% safety buffer
         """
-        content = response.content if hasattr(response, 'content') else str(response)
-
         try:
-            # Try to parse the entire content as JSON first
-            return json.loads(content)
-        except Exception as e:
-            try:
-                return json5.loads(content)
-            except Exception as e:
-                pass
+            encoding = tiktoken.get_encoding("cl100k_base")
+            prompt_tokens = len(encoding.encode(text))
+        except Exception:
+            # Fallback to character-based estimation
+            prompt_tokens = len(text) // 4
 
-        # Try to extract JSON from code blocks (```json ... ``` or ``` ... ```)
-        code_block_patterns = [
-            r'```json\s*\n(.*?)\n```',  # ```json ... ```
-            r'```\s*\n(.*?)\n```',      # ``` ... ```
-            r'`(.*?)`'                   # `...` (single backticks)
-        ]
+        completion_tokens = max_tokens if max_tokens else 0
+        total_tokens = int((prompt_tokens + completion_tokens) * 1.15)
 
-        for pattern in code_block_patterns:
-            matches = re.findall(pattern, content, re.DOTALL)
-            for match in matches:
-                try:
-                    return json5.loads(match.strip())
-                except Exception as e:
-                    continue
+        return total_tokens
 
-        # Try to find JSON object patterns in the response
-        try:
-            # Look for JSON object patterns (handles nested objects better)
-            json_pattern = r'\{(?:[^{}]|{[^{}]*})*\}'
-            matches = re.findall(json_pattern, content, re.DOTALL)
 
-            if matches:
-                # Try to parse each match, starting with the largest
-                matches.sort(key=len, reverse=True)
-                for match in matches:
-                    try:
-                        return json5.loads(match)
-                    except Exception as e:
-                        continue
-
-        except (json.JSONDecodeError, ValueError):
-            pass
-
-        # If we get here, JSON parsing failed completely
-        raise ValueError(f"Invalid JSON response. Content:\n{content}")
-
+# ============================================================================
+# Rate Limiting
+# ============================================================================
 
 class TokenBucketRateLimiter:
-    """Rate limiter using token bucket algorithm"""
+    """Simple token bucket rate limiter for single metric"""
 
-    def __init__(self, calls_per_minute=20, burst_size=8):
-        """
-        Args:
-            calls_per_minute: Sustained rate limit (20 calls/minute)
-            burst_size: Maximum burst capacity (8 calls instantly)
-        """
-        self.rate = calls_per_minute / 60.0  # Convert to tokens per second
-        self.burst_size = burst_size         # Maximum tokens in bucket
-        self.tokens = float(burst_size)      # Start with full bucket
-        self.last_update = time.time()       # Last time we added tokens
-        self.lock = threading.Lock()         # Thread safety
+    def __init__(self, calls_per_minute: int = 20, burst_size: int = 8):
+        self.rate = calls_per_minute / 60.0
+        self.burst_size = burst_size
+        self.tokens = float(burst_size)
+        self.last_update = time.time()
+        self.lock = threading.Lock()
 
-    def acquire_token(self):
-        """Wait if necessary to respect rate limit (iterative approach)"""
+    def acquire_token(self, tokens_needed: float = 1.0) -> None:
+        """Wait if necessary to acquire tokens"""
         while True:
             with self.lock:
                 now = time.time()
@@ -231,53 +152,29 @@ class TokenBucketRateLimiter:
                 self.tokens = min(self.burst_size, self.tokens + tokens_to_add)
                 self.last_update = now
 
-                if self.tokens >= 1.0:
-                    self.tokens -= 1.0
-                    return  # We have a token, proceed
+                if self.tokens >= tokens_needed:
+                    self.tokens -= tokens_needed
+                    return
 
-                # Calculate wait time if no token is available
-                tokens_needed = 1.0 - self.tokens
-                wait_time = tokens_needed / self.rate
+                wait_time = (tokens_needed - self.tokens) / self.rate
 
             if wait_time > 0:
                 time.sleep(wait_time)
 
 
 class DualRateLimiter:
-    """
-    Thread-safe rate limiter managing both request and token limits using token bucket algorithm.
+    """Rate limiter managing both request and token limits"""
 
-    Enforces both requests-per-minute and tokens-per-minute limits with configurable burst sizes.
-    Designed for development and testing with multiple concurrent API calls.
-    """
-
-    def __init__(self, config):
-        """
-        Initialize the dual rate limiter.
-
-        Args:
-            config (dict): Configuration with keys:
-                - requests_per_minute: Maximum requests per minute
-                - tokens_per_minute: Maximum tokens per minute
-                - request_burst_size: Maximum burst requests (optional, default: 10)
-                - token_burst_size: Maximum burst tokens (optional, auto-calculated)
-        """
-        # Configuration
-        self.requests_per_minute = config['requests_per_minute']
-        self.tokens_per_minute = config['tokens_per_minute']
-        self.request_burst_size = config.get('request_burst_size', 10)
-        self.token_burst_size = config.get('token_burst_size',
-                                          int(self.tokens_per_minute / 60 * 2))  # 2 seconds of tokens
-
-        # Bucket state
-        self.request_bucket = float(self.request_burst_size)
-        self.token_bucket = float(self.token_burst_size)
-        self.last_refill_time = time.time()
-
-        # Thread safety
-        self._lock = threading.Lock()
-
-        # Metrics
+    def __init__(self, config: RateLimitConfig):
+        self.config = config
+        self.request_limiter = TokenBucketRateLimiter(
+            config.requests_per_minute,
+            config.request_burst_size
+        )
+        self.token_limiter = TokenBucketRateLimiter(
+            config.tokens_per_minute,
+            config.token_burst_size or int(config.tokens_per_minute / 60 * 2)
+        )
         self.stats = {
             'total_requests': 0,
             'total_tokens': 0,
@@ -285,400 +182,367 @@ class DualRateLimiter:
             'request_limited_count': 0,
             'token_limited_count': 0
         }
+        self._lock = threading.Lock()
 
-    def _refill_buckets(self):
-        """
-        Refill buckets based on TOTAL elapsed time since last refill.
-        Must be called within lock.
-        """
-        now = time.time()
-        elapsed = now - self.last_refill_time  # Full elapsed time, not capped
-
-        # Calculate tokens to add for entire elapsed period
-        request_tokens_to_add = elapsed * (self.requests_per_minute / 60.0)
-        token_tokens_to_add = elapsed * (self.tokens_per_minute / 60.0)
-
-        # Add tokens but cap at burst size
-        self.request_bucket = min(
-            self.request_bucket + request_tokens_to_add,
-            self.request_burst_size
-        )
-        self.token_bucket = min(
-            self.token_bucket + token_tokens_to_add,
-            self.token_burst_size
-        )
-
-        self.last_refill_time = now
-
-    def wait_for_permission(self, tokens_needed):
-        """
-        Wait for permission to make a request with the specified token count.
-
-        Thread-safe method that blocks until both request and token resources are available.
-
-        Args:
-            tokens_needed (int): Number of tokens required for the request
-
-        Raises:
-            ValueError: If tokens_needed exceeds token_burst_size
-        """
-        if tokens_needed > self.token_burst_size:
-            raise ValueError(f"Request requires {tokens_needed} tokens but burst size is only {self.token_burst_size}")
+    def wait_for_permission(self, tokens_needed: int) -> None:
+        """Wait for permission for both request and token resources"""
+        token_burst_size = self.config.token_burst_size or int(self.config.tokens_per_minute / 60 * 2)
+        if tokens_needed > token_burst_size:
+            raise ValueError(
+                f"Request requires {tokens_needed} tokens but burst size is only {self.config.token_burst_size}"
+            )
 
         start_time = time.time()
-        was_throttled = False
-        limiting_factor = None
 
-        while True:
-            with self._lock:
-                self._refill_buckets()
+        # Acquire request token
+        self.request_limiter.acquire_token(1.0)
 
-                if self.request_bucket >= 1 and self.token_bucket >= tokens_needed:
-                    # Consume resources
-                    self.request_bucket -= 1
-                    self.token_bucket -= tokens_needed
+        # Acquire token tokens
+        self.token_limiter.acquire_token(tokens_needed)
 
-                    # Update stats
-                    self.stats['total_requests'] += 1
-                    self.stats['total_tokens'] += int(tokens_needed)
-                    wait_time = time.time() - start_time
-                    self.stats['total_wait_time'] += wait_time
+        # Update stats
+        with self._lock:
+            self.stats['total_requests'] += 1
+            self.stats['total_tokens'] += tokens_needed
+            self.stats['total_wait_time'] += time.time() - start_time
 
-                    # Only increment throttle counters if we actually waited
-                    if was_throttled:
-                        if limiting_factor == 'requests':
-                            self.stats['request_limited_count'] += 1
-                        else:
-                            self.stats['token_limited_count'] += 1
-
-                    return
-
-                # Calculate wait time
-                request_wait = 0 if self.request_bucket >= 1 else \
-                              (1 - self.request_bucket) * 60 / self.requests_per_minute
-                token_wait = 0 if self.token_bucket >= tokens_needed else \
-                            (tokens_needed - self.token_bucket) * 60 / self.tokens_per_minute
-
-                wait_time = max(request_wait, token_wait)
-
-                # Track that we're throttling and why (only on first iteration)
-                if not was_throttled and wait_time > 0:
-                    was_throttled = True
-                    limiting_factor = 'requests' if request_wait > token_wait else 'tokens'
-
-            # Sleep outside the lock
-            if wait_time > 0:
-                time.sleep(wait_time)
-
-    def get_stats(self):
-        """
-        Get current rate limiting statistics in a thread-safe manner.
-
-        Returns:
-            dict: Copy of current statistics
-        """
+    def get_stats(self) -> Dict[str, Any]:
+        """Get current statistics"""
         with self._lock:
             return self.stats.copy()
 
 
-def estimate_tokens(model_name, text, max_tokens=None):
-    """
-    Estimates total token usage for a request.
+# ============================================================================
+# Response Processors
+# ============================================================================
 
-    Args:
-        model_name (str): The model being used
-        text (str): The prompt text
-        max_tokens (int, optional): Maximum completion tokens (if specified)
-
-    Returns:
-        int: Estimated total tokens (prompt + completion + buffer)
-    """
-    try:
-        # Use cl100k_base encoding for all models
-        encoding = tiktoken.get_encoding("cl100k_base")
-        prompt_tokens = len(encoding.encode(text))
-
-        # Add completion tokens if specified
-        completion_tokens = max_tokens if max_tokens else 0
-
-        # Calculate total with 15% safety buffer
-        total_tokens = int((prompt_tokens + completion_tokens) * 1.15)
-
-        return total_tokens
-
-    except Exception:
-        # Fallback to character-based estimation with safety buffer
-        prompt_tokens = len(text) // 4
-        completion_tokens = max_tokens if max_tokens else 0
-        return int((prompt_tokens + completion_tokens) * 1.15)
+@runtime_checkable
+class ResponseProcessor(Protocol):
+    """Protocol for response processors"""
+    def process(self, response: Any) -> Any:
+        """Process the LLM response"""
+        ...
 
 
-class RetryLLM:
-    """
-    LLM wrapper with retry mechanism but no JSON parsing.
+class RawResponseProcessor:
+    """Returns response as-is"""
+    def process(self, response: Any) -> Any:
+        return response
 
-    Provides the same retry logic as GPT class but returns raw responses
-    without attempting to parse JSON. Useful when you want direct access
-    to the LLM response but still need robust error handling.
-    """
 
-    def __init__(self, model_name, temperature, max_tokens, provider="openrouter", key=None):
-        """
-        Initialize RetryLLM wrapper.
+class JSONResponseProcessor:
+    """Extracts and parses JSON from response"""
 
-        Args:
-            model_name (str): The model to use
-            temperature (float): Temperature setting for generation
-            max_tokens (int): Maximum tokens for completion
-            provider (str): Either "openai" or "openrouter"
-            key (str): Key selector - if "self" and provider is not "openrouter", uses SELF_OPENAI_API_KEY, else OPENAI_API_KEY
-        """
-        self.model_name = model_name
-        self.temperature = temperature
-        self.max_tokens = max_tokens
-        self.provider = provider.lower()
-        self.key = key
+    def process(self, response: Any) -> Dict[str, Any]:
+        """Parse JSON from response with multiple fallback strategies"""
+        content = response.content if hasattr(response, 'content') else str(response)
 
-        # Configure based on provider
-        if provider == "openrouter":
-            api_key = SecretStr(os.getenv("OPENROUTER_API_KEY", ""))
-            base_url = "https://openrouter.ai/api/v1"
-        else:  # default to openai
-            if key == "self":
-                api_key = SecretStr(os.getenv("SELF_OPENAI_API_KEY", ""))
-            elif key == "elm":
-                api_key = SecretStr(os.getenv("ELM_OPENAI_API_KEY", ""))
-            else:
-                api_key = SecretStr(os.getenv("OPENAI_API_KEY", ""))
-            base_url = None
-
-        self.llm = ChatOpenAI(
-            model=model_name,
-            api_key=api_key,
-            temperature=temperature,
-            max_tokens=max_tokens,
-            base_url=base_url,
-            max_retries=50
-        )
-
-        # Create directory for saving prompts if it doesn't exist
-        self.prompts_dir = Path("prompts_log")
-        self.prompts_dir.mkdir(exist_ok=True)
-
-    def get_model_name(self):
-        """Get the model name."""
-        return self.model_name
-
-    def get_temperature(self):
-        """Get the temperature setting."""
-        return self.temperature
-
-    def get_max_tokens(self):
-        """Get the max tokens setting."""
-        return self.max_tokens
-
-    def get_provider(self):
-        """Get the provider setting."""
-        return self.provider
-
-    def get_key(self):
-        """Get the key setting."""
-        return self.key
-
-    def invoke(self, prompt_text):
-        """
-        Invoke the LLM with retry logic but no JSON parsing.
-
-        Args:
-            prompt_text (str): The formatted prompt text to send to the LLM
-
-        Returns:
-            ChatOpenAI response object (with .content and .usage_metadata attributes)
-        """
-        max_retries = 50
-        base_delay = 2
-
-        # Generate unique ID for this prompt
-        prompt_id = str(uuid.uuid4())
-        prompt_file = self.prompts_dir / f"prompt_{prompt_id}.json"
-
-        # Save the prompt to file
-        prompt_data = {
-            "prompt_text": prompt_text,
-            "model": self.model_name,
-            "timestamp": time.time()
+        parsed_json = self._parse_json(content)
+        return {
+            'json': parsed_json,
+            'raw_response': response
         }
+
+    def _parse_json(self, content: str) -> Any:
+        """Parse JSON from content with multiple strategies"""
+        # Try direct JSON parsing
+        try:
+            return json.loads(content)
+        except Exception:
+            try:
+                return json5.loads(content)
+            except Exception:
+                pass
+
+        # Try code blocks
+        code_block_patterns = [
+            r'```json\s*\n(.*?)\n```',
+            r'```\s*\n(.*?)\n```',
+            r'`(.*?)`'
+        ]
+
+        for pattern in code_block_patterns:
+            matches = re.findall(pattern, content, re.DOTALL)
+            for match in matches:
+                try:
+                    return json5.loads(match.strip())
+                except Exception:
+                    continue
+
+        # Try JSON object patterns
+        json_pattern = r'\{(?:[^{}]|{[^{}]*})*\}'
+        matches = re.findall(json_pattern, content, re.DOTALL)
+
+        if matches:
+            matches.sort(key=len, reverse=True)
+            for match in matches:
+                try:
+                    return json5.loads(match)
+                except Exception:
+                    continue
+
+        raise ValueError(f"Invalid JSON response. Content:\n{content}")
+
+
+# ============================================================================
+# Retry Strategy
+# ============================================================================
+
+class RetryStrategy:
+    """Configurable retry strategy for API calls"""
+
+    def __init__(self, max_retries: int = 50, base_delay: float = 2.0, max_delay: float = 60.0):
+        self.max_retries = max_retries
+        self.base_delay = base_delay
+        self.max_delay = max_delay
+        self.retryable_errors = [
+            "Internal Server Error", "500", "502", "503", "504",
+            "timeout", "connection", "rate limit", "too many requests"
+        ]
+
+    def should_retry(self, error: Exception, attempt: int) -> bool:
+        """Determine if we should retry based on error and attempt number"""
+        if attempt >= self.max_retries:
+            return False
+
+        error_str = str(error).lower()
+        return any(err.lower() in error_str for err in self.retryable_errors)
+
+    def get_delay(self, attempt: int) -> float:
+        """Calculate delay for the given attempt"""
+        return min(self.base_delay * (2 ** attempt), self.max_delay)
+
+
+# ============================================================================
+# Prompt Logger
+# ============================================================================
+
+class PromptLogger:
+    """Handles logging of prompts for debugging"""
+
+    def __init__(self, log_dir: str = "prompts_log"):
+        self.log_dir = Path(log_dir)
+        self.log_dir.mkdir(exist_ok=True)
+
+    def log_prompt(self, prompt_data: Dict[str, Any]) -> Path:
+        """Log a prompt and return the log file path"""
+        prompt_id = str(uuid.uuid4())
+        prompt_file = self.log_dir / f"prompt_{prompt_id}.json"
+
+        prompt_data['timestamp'] = time.time()
 
         with open(prompt_file, "w", encoding="utf-8") as f:
             json.dump(prompt_data, f, indent=2)
 
-        for attempt in range(max_retries):
+        return prompt_file
+
+    def remove_log(self, log_file: Path) -> None:
+        """Remove a log file if it exists"""
+        if log_file.exists():
+            log_file.unlink()
+
+
+# ============================================================================
+# Main LLM Client
+# ============================================================================
+
+class LLMClient:
+    """
+    Flexible LLM client with pluggable components.
+    Uses composition to combine different capabilities.
+    """
+
+    def __init__(
+        self,
+        config: LLMConfig,
+        rate_limiter: Optional[DualRateLimiter] = None,
+        response_processor: Optional[ResponseProcessor] = None,
+        retry_strategy: Optional[RetryStrategy] = None,
+        prompt_logger: Optional[PromptLogger] = None,
+        token_estimator: Optional[TokenEstimator] = None
+    ):
+        self.config = config
+        self.provider = LLMProviderFactory.create_provider(config)
+        self.rate_limiter = rate_limiter
+        self.response_processor = response_processor or RawResponseProcessor()
+        self.retry_strategy = retry_strategy or RetryStrategy()
+        self.prompt_logger = prompt_logger
+        self.token_estimator = token_estimator or TokenEstimator()
+
+    def invoke(self, prompt, **kwargs) -> Any:
+        """
+        Invoke the LLM with the given prompt.
+
+        Args:
+            prompt: Either a string or a LangChain prompt template
+            **kwargs: Variables to format into the prompt (if using template)
+
+        Returns:
+            Processed response based on the configured processor
+        """
+        # Format prompt if it's a template
+        prompt_text = self._format_prompt(prompt, kwargs)
+
+        # Apply rate limiting if configured
+        if self.rate_limiter:
+            tokens_needed = self.token_estimator.estimate(
+                prompt_text,
+                self.config.max_tokens
+            )
+            self.rate_limiter.wait_for_permission(tokens_needed)
+
+        # Log prompt if configured
+        log_file = None
+        if self.prompt_logger:
+            log_data = {
+                'prompt': prompt_text,
+                'kwargs': kwargs,
+                'model': self.config.model_name
+            }
+            log_file = self.prompt_logger.log_prompt(log_data)
+
+        # Execute with retries
+        response = self._execute_with_retry(prompt, kwargs, prompt_text)
+
+        # Clean up log on success
+        if self.prompt_logger and log_file:
+            self.prompt_logger.remove_log(log_file)
+
+        # Process and return response
+        return self.response_processor.process(response)
+
+    def _format_prompt(self, prompt, kwargs: Dict[str, Any]) -> str:
+        """Format prompt into text"""
+        if isinstance(prompt, str):
+            return prompt
+
+        # Handle LangChain prompt templates
+        try:
+            if hasattr(prompt, 'format'):
+                return prompt.format(**kwargs)
+            elif hasattr(prompt, '__or__'):
+                # It's a chain, we need to estimate from kwargs
+                return ' '.join(str(v) for v in kwargs.values())
+        except (AttributeError, KeyError, ValueError):
+            pass
+
+        # Fallback
+        return str(prompt) + ' ' + ' '.join(str(v) for v in kwargs.values())
+
+    def _execute_with_retry(self, prompt, kwargs: Dict[str, Any], prompt_text: str) -> Any:
+        """Execute the LLM call with retry logic"""
+        for attempt in range(self.retry_strategy.max_retries):
             try:
-                response = self.llm.invoke(prompt_text)
-
-                # Success - delete the prompt file
-                if prompt_file.exists():
-                    prompt_file.unlink()
-
-                return response
+                # Determine how to invoke based on prompt type
+                if isinstance(prompt, str):
+                    # Direct string prompt
+                    return self.provider.invoke(prompt_text)
+                elif hasattr(prompt, 'format'):
+                    # LangChain prompt template - format then invoke
+                    formatted_prompt = prompt.format(**kwargs)
+                    return self.provider.invoke(formatted_prompt)
+                else:
+                    # Fallback: try to use prompt directly
+                    return self.provider.invoke(str(prompt))
 
             except Exception as e:
-                error_str = str(e)
-
-                retryable_errors = [
-                    "Internal Server Error",
-                    "500",
-                    "502",
-                    "503",
-                    "504",
-                    "timeout",
-                    "connection",
-                    "rate limit",
-                    "too many requests"
-                ]
-
-                is_retryable = any(error_type.lower() in error_str.lower() for error_type in retryable_errors)
-                is_retryable = True
-
-                if not is_retryable or attempt == max_retries - 1:
-                    # Keep the prompt file for analysis (don't delete it)
+                if not self.retry_strategy.should_retry(e, attempt + 1):
                     raise e
 
-                delay = min(base_delay * (2 ** attempt), 60)
-                print(f"Error (attempt {attempt + 1}/{max_retries}): {error_str}")
-                time.sleep(delay)
+                if attempt < self.retry_strategy.max_retries - 1:
+                    delay = self.retry_strategy.get_delay(attempt)
+                    print(f"Error (attempt {attempt + 1}/{self.retry_strategy.max_retries}): {str(e)}")
+                    time.sleep(delay)
+                else:
+                    raise e
+
+    def get_stats(self) -> Optional[Dict[str, Any]]:
+        """Get rate limiter stats if available"""
+        if self.rate_limiter:
+            return self.rate_limiter.get_stats()
+        return None
+
+    def get_model_name(self) -> str:
+        """Get the model name"""
+        return self.config.model_name
+
+    def get_temperature(self) -> float:
+        """Get the temperature setting"""
+        return self.config.temperature
+
+    def get_max_tokens(self) -> int:
+        """Get the max tokens setting"""
+        return self.config.max_tokens
+
+    def get_provider(self) -> str:
+        """Get the provider name"""
+        return self.config.provider
+
+    def get_key(self) -> Optional[str]:
+        """Get the API key environment variable name"""
+        return self.config.api_key_env
 
 
-class RateLimitedRetryLLM(RetryLLM):
-    """
-    LLM wrapper with both rate limiting and retry mechanism but no JSON parsing.
+# ============================================================================
+# Convenience Factory Functions
+# ============================================================================
 
-    Combines the retry logic from RetryLLM with rate limiting from DualRateLimiter.
-    Returns raw responses without attempting to parse JSON.
-    """
-
-    def __init__(self, model_name="gpt-4o-mini", temperature=0.0, max_tokens=8000, provider="openai", key="self", rate_limit_config=None):
-        """
-        Initialize RateLimitedRetryLLM with rate limiting configuration.
-
-        Args:
-            model_name (str): The model to use
-            temperature (float): Temperature setting for generation
-            max_tokens (int): Maximum tokens for completion
-            provider (str): Either "openai" or "openrouter"
-            key (str): Key selector for API key
-            rate_limit_config (dict, optional): Rate limiting configuration
-        """
-        # Initialize parent RetryLLM class
-        super().__init__(model_name, temperature, max_tokens, provider, key)
-
-        # Initialize rate limiter with defaults if not provided
-        default_config = {
-            'requests_per_minute': 5000,
-            'tokens_per_minute': 4000000,
-            'request_burst_size': 500
-        }
-        config = rate_limit_config or default_config
-        self.rate_limiter = DualRateLimiter(config)
-
-    def invoke(self, prompt_text):
-        """
-        Make a rate-limited API call with retry logic but no JSON parsing.
-
-        Args:
-            prompt_text (str): The formatted prompt text to send to the LLM
-
-        Returns:
-            ChatOpenAI response object (with .content and .usage_metadata attributes)
-        """
-        # Estimate tokens needed for this request (prompt + max_tokens for completion)
-        tokens_needed = estimate_tokens(self.model_name, prompt_text, self.max_tokens)
-
-        # Wait for permission (both request and token limits)
-        self.rate_limiter.wait_for_permission(tokens_needed)
-
-        # Make the actual API call (with existing retry logic from parent)
-        return super().invoke(prompt_text)
-
-    def get_rate_limit_stats(self):
-        """
-        Get current rate limiting statistics.
-
-        Returns:
-            dict: Rate limiting statistics
-        """
-        return self.rate_limiter.get_stats()
+def create_simple_llm(
+    model_name: str = "gpt-4o-mini",
+    temperature: float = 0.0,
+    max_tokens: int = 8000,
+    provider: str = "openai",
+    api_key_env: Optional[str] = None
+) -> LLMClient:
+    """Create a simple LLM client without rate limiting or JSON parsing"""
+    config = LLMConfig(model_name, temperature, max_tokens, provider, api_key_env)
+    return LLMClient(config)
 
 
-class RateLimitedGPT(GPT):
-    """
-    GPT wrapper with dual rate limiting for both requests and tokens.
+def create_json_llm(
+    model_name: str = "gpt-4o-mini",
+    temperature: float = 0.0,
+    max_tokens: int = 8000,
+    provider: str = "openai",
+    api_key_env: Optional[str] = None,
+    enable_logging: bool = True
+) -> LLMClient:
+    """Create an LLM client with JSON response parsing"""
+    config = LLMConfig(model_name, temperature, max_tokens, provider, api_key_env)
+    prompt_logger = PromptLogger() if enable_logging else None
 
-    Supports both requests-per-minute and tokens-per-minute limits with configurable
-    burst sizes. Uses the DualRateLimiter for thread-safe concurrent access.
-    """
+    return LLMClient(
+        config,
+        response_processor=JSONResponseProcessor(),
+        prompt_logger=prompt_logger
+    )
 
-    def __init__(self, model_name="gpt-4o-mini", temperature=None, max_tokens=8000, provider="openai", key="self", rate_limit_config=None):
-        """
-        Initialize RateLimitedGPT with rate limiting configuration.
 
-        Args:
-            model_name (str): The model to use
-            temperature (float): Temperature setting for generation
-            max_tokens (int): Maximum tokens for completion
-            provider (str): Either "openai" or "openrouter"
-            key (str): Key selector for API key
-            rate_limit_config (dict, optional): Rate limiting configuration
-        """
-        # Initialize parent GPT class
-        super().__init__(model_name, temperature, max_tokens, provider, key)
+def create_rate_limited_llm(
+    model_name: str = "gpt-4o-mini",
+    temperature: float = 0.0,
+    max_tokens: int = 8000,
+    provider: str = "openai",
+    api_key_env: Optional[str] = None,
+    rate_limit_config: Optional[RateLimitConfig] = None,
+    parse_json: bool = False,
+    enable_logging: bool = True
+) -> LLMClient:
+    """Create an LLM client with rate limiting"""
+    config = LLMConfig(model_name, temperature, max_tokens, provider, api_key_env)
+    rate_config = rate_limit_config or RateLimitConfig()
+    rate_limiter = DualRateLimiter(rate_config)
 
-        # Initialize rate limiter with defaults if not provided
-        default_config = {
-            'requests_per_minute': 5000,
-            'tokens_per_minute': 4000000,
-            'request_burst_size': 500
-        }
-        config = rate_limit_config or default_config
-        self.rate_limiter = DualRateLimiter(config)
+    response_processor = JSONResponseProcessor() if parse_json else RawResponseProcessor()
+    prompt_logger = PromptLogger() if enable_logging else None
 
-    def __call__(self, prompt, **kwargs):
-        """
-        Make a rate-limited API call.
+    return LLMClient(
+        config,
+        rate_limiter=rate_limiter,
+        response_processor=response_processor,
+        prompt_logger=prompt_logger
+    )
 
-        Args:
-            prompt: LangChain prompt template
-            **kwargs: Variables to be formatted into the prompt (e.g., context, question)
-
-        Returns:
-            dict: Response with 'json' and 'raw_response' keys
-        """
-        # Use the prompt's format method to get the full formatted text
-        try:
-            formatted_prompt_text = prompt.format(**kwargs)
-        except (AttributeError, KeyError, ValueError):
-            # Fallback: convert to string and estimate conservatively
-            prompt_text = str(prompt)
-            kwargs_text = ' '.join(str(v) for v in kwargs.values()) if kwargs else ''
-            formatted_prompt_text = prompt_text + ' ' + kwargs_text
-
-        # Estimate tokens needed for this request (prompt + max_tokens for completion)
-        tokens_needed = estimate_tokens(self.model_name, formatted_prompt_text, self.max_tokens)
-
-        # Wait for permission (both request and token limits)
-        self.rate_limiter.wait_for_permission(tokens_needed)
-
-        # Make the actual API call (with existing retry logic)
-        return super().__call__(prompt, **kwargs)
-
-    def get_rate_limit_stats(self):
-        """
-        Get current rate limiting statistics.
-
-        Returns:
-            dict: Rate limiting statistics
-        """
-        return self.rate_limiter.get_stats()
 
 
 def num_tokens_from_string(string: str, encoding_name: str) -> int:
