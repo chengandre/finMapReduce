@@ -384,27 +384,27 @@ def main():
     prompt_template = load_prompt('prompts/judge_evaluation.yml')
 
     # Configure rate-limited LLM
-    rate_limiter_config = {
-        "requests_per_minute": 20,
-        "tokens_per_minute": 4000000,
-        "request_burst_size": 5,
-    }
-
     # rate_limiter_config = {
-    #     "requests_per_minute": 30000,
-    #     "tokens_per_minute": 150000000,
-    #     "request_burst_size": 3000,
+    #     "requests_per_minute": 20,
+    #     "tokens_per_minute": 4000000,
+    #     "request_burst_size": 5,
     # }
 
-    model_name = "deepseek/deepseek-r1-0528:free"
-    # model_name = "gpt-5"
+    rate_limiter_config = {
+        "requests_per_minute": 30000,
+        "tokens_per_minute": 150000000,
+        "request_burst_size": 3000,
+    }
+
+    # model_name = "deepseek/deepseek-r1-0528:free"
+    model_name = "gpt-5-nano"
 
     rate_config = RateLimitConfig(**rate_limiter_config)
     llm = create_rate_limited_llm(
         model_name=model_name,
-        temperature=0.00,
+        temperature=1.00,
         max_tokens=8192,
-        provider="openrouter",
+        provider="openai",
         api_key_env="elm",
         rate_limit_config=rate_config,
         parse_json=True

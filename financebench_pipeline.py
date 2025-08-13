@@ -126,6 +126,23 @@ class FinanceBenchPipeline(BaseMapReduceQA):
         """Delegate to output formatter."""
         return self.output_formatter.parse_final_result_with_map_data(reduce_result, map_results)
 
+    # Async method overrides for better performance when using async LLM clients
+    async def invoke_llm_map_async(self, chunk: Any, question: str) -> Dict[str, Any]:
+        """Async version of invoke_llm_map, delegate to formatter if it supports async."""
+        if hasattr(self.output_formatter, 'invoke_llm_map_async'):
+            return await self.output_formatter.invoke_llm_map_async(chunk, question)
+        else:
+            # Fallback to base implementation (executor-based)
+            return await super().invoke_llm_map_async(chunk, question)
+
+    async def invoke_llm_reduce_async(self, formatted_results: Any, question: str) -> Any:
+        """Async version of invoke_llm_reduce, delegate to formatter if it supports async."""
+        if hasattr(self.output_formatter, 'invoke_llm_reduce_async'):
+            return await self.output_formatter.invoke_llm_reduce_async(formatted_results, question)
+        else:
+            # Fallback to base implementation (executor-based)
+            return await super().invoke_llm_reduce_async(formatted_results, question)
+
     def get_judge_prompt_key(self) -> str:
         """Delegate to output formatter."""
         return self.output_formatter.get_judge_prompt_key()

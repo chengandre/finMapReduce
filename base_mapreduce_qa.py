@@ -5,6 +5,7 @@ from tqdm import tqdm
 import time
 import json
 import os
+import asyncio
 from datetime import datetime
 
 
@@ -297,6 +298,286 @@ class BaseMapReduceQA(ABC):
         self._print_summary(evaluation_results, judge_model_name)
 
         return results
+
+    # ===== Async Methods =====
+
+    async def invoke_llm_map_async(self, chunk: Any, question: str) -> Dict[str, Any]:
+        """
+        Async version of invoke_llm_map.
+        Default implementation uses executor for backward compatibility.
+        Subclasses can override for true async.
+        """
+        if hasattr(self.map_llm, 'ainvoke'):
+            # If LLM supports async, subclass should override this method
+            # to use it properly with specific prompt handling
+            pass
+
+        # Fallback to sync version in thread
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(
+            None,
+            self.invoke_llm_map,
+            chunk,
+            question
+        )
+
+    async def invoke_llm_reduce_async(self, formatted_results: Any, question: str) -> Any:
+        """
+        Async version of invoke_llm_reduce.
+        Default implementation uses executor for backward compatibility.
+        """
+        if hasattr(self.reduce_llm, 'ainvoke'):
+            # Subclass should override if using async LLM
+            pass
+
+        # Fallback to sync version in thread
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(
+            None,
+            self.invoke_llm_reduce,
+            formatted_results,
+            question
+        )
+
+    async def _map_phase_async(self, docs: List[Any], question: str) -> Tuple[List[Dict], Dict[str, int], float]:
+        """Async version of map phase with proper concurrency control"""
+        loop = asyncio.get_running_loop()
+        map_start_time = loop.time()
+
+        # Use semaphore to limit concurrency (not len(docs)!)
+        semaphore = asyncio.Semaphore(min(self.max_concurrent_chunks, len(docs)))
+
+        async def process_chunk_with_limit(chunk, index):
+            async with semaphore:
+                try:
+                    result = await self.invoke_llm_map_async(chunk, question)
+                    return index, result
+                except Exception as e:
+                    print(f"Error in map phase for chunk {index}: {e}")
+                    return index, {"error": str(e), "content": ""}
+
+        # Create tasks
+        tasks = [
+            asyncio.create_task(process_chunk_with_limit(chunk, i))
+            for i, chunk in enumerate(docs)
+        ]
+
+        # Gather results maintaining order
+        results_with_index = await asyncio.gather(*tasks, return_exceptions=True)
+
+        # Sort by index and extract results
+        results = []
+        for item in sorted(results_with_index, key=lambda x: x[0] if isinstance(x, tuple) else -1):
+            if isinstance(item, tuple):
+                _, result = item
+                results.append(result)
+            elif isinstance(item, Exception):
+                results.append({"error": str(item), "content": ""})
+            else:
+                results.append({"error": "Unknown error", "content": ""})
+
+        map_time = loop.time() - map_start_time
+
+        # Calculate tokens (reuse existing method)
+        tokens = self._calculate_map_tokens(results)
+
+        return results, tokens, map_time
+
+    async def _reduce_phase_async(self, map_results: List[Any], question: str) -> Tuple[Any, Dict[str, int], float]:
+        """Async version of reduce phase"""
+        loop = asyncio.get_running_loop()
+        reduce_start_time = loop.time()
+
+        # Format results for reduce
+        formatted_results = self.format_map_results_for_reduce(map_results, question)
+
+        # Invoke reduce
+        result_final = await self.invoke_llm_reduce_async(formatted_results, question)
+
+        reduce_time = loop.time() - reduce_start_time
+
+        # Get token usage
+        tokens = self._calculate_reduce_tokens(result_final)
+
+        return result_final, tokens, reduce_time
+
+    async def process_single_qa_async(self, qa_pair: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Async version of process_single_qa.
+        Reuses most of the sync logic but with async map/reduce phases.
+        """
+        question = qa_pair["question"]
+        map_question = self.get_map_question(qa_pair=qa_pair)
+
+        # Step 1: Load document chunks (keep sync, run in executor if needed)
+        try:
+            loop = asyncio.get_running_loop()
+            docs, _ = await loop.run_in_executor(
+                None,
+                self.load_document_chunks,
+                qa_pair
+            )
+        except Exception as e:
+            print(f"Error loading document for {self.get_document_identifier(qa_pair)}: {e}")
+            return self._handle_document_error(qa_pair, str(e))
+
+        if not docs:
+            return self._handle_document_error(qa_pair, "No documents loaded")
+
+        # Step 2: Async map phase
+        map_results, map_tokens, map_time = await self._map_phase_async(docs, map_question)
+
+        if not map_results:
+            return self._handle_processing_error(qa_pair, "No results from map phase")
+
+        # Step 3: Preprocess/filter results (keep sync)
+        chunks_before_filtering = len(map_results)
+        score_analysis = self._extract_score_analysis(map_results)
+        filtered_results = self.preprocess_map_results(map_results)
+        chunks_after_filtering = len(filtered_results)
+
+        if not filtered_results:
+            return self._handle_processing_error(qa_pair, "No results after preprocessing")
+
+        # Step 4: Async reduce phase
+        final_result, reduce_tokens, reduce_time = await self._reduce_phase_async(filtered_results, question)
+
+        # Step 5: Parse and store results
+        parsed_results = self.parse_final_result_with_map_data(final_result, filtered_results)
+        qa_pair.update(parsed_results)
+
+        # Step 6: Store token statistics and timing
+        filtering_stats = self._calculate_filtering_stats(chunks_before_filtering, chunks_after_filtering, score_analysis)
+        qa_pair["token_stats"] = self._compile_token_stats(
+            len(docs), map_tokens, reduce_tokens, map_time, reduce_time, filtering_stats
+        )
+
+        return qa_pair
+
+    async def process_dataset_async(self,
+                                   data_path: str,
+                                   model_name: str,
+                                   num_samples: Optional[int] = None,
+                                   judge_llm: Optional[Any] = None,
+                                   **kwargs) -> Dict[str, Any]:
+        """
+        Async version of process_dataset.
+        """
+        # Load data (keep sync)
+        print(f"Loading {num_samples if num_samples else 'all'} samples from {self.get_dataset_name()} dataset...")
+        qa_data = self.load_data(data_path, num_samples)
+
+        if not qa_data:
+            raise ValueError(f"No data loaded from {data_path}")
+
+        # Print document information
+        self._print_document_info(qa_data)
+
+        # TODO: Implement async question preprocessing if needed
+        question_improvement_tokens = {"input_tokens": 0, "output_tokens": 0, "cache_read_tokens": 0}
+
+        loop = asyncio.get_running_loop()
+        t1 = loop.time()
+        print(f"Processing {len(qa_data)} QA pairs with max {self.max_concurrent_qa} concurrent...")
+
+        # Process QA pairs with semaphore for concurrency control
+        semaphore = asyncio.Semaphore(min(self.max_concurrent_qa, len(qa_data)))
+
+        async def process_with_semaphore(qa_pair, idx):
+            async with semaphore:
+                try:
+                    return await self.process_single_qa_async(qa_pair), idx
+                except Exception as e:
+                    print(f"Error processing QA pair {idx+1}: {e}")
+                    qa_pair["llm_answer"] = "Error during processing"
+                    qa_pair["error"] = str(e)
+                    qa_pair["token_stats"] = self._empty_token_stats()
+                    return qa_pair, idx
+
+        # Create tasks
+        tasks = [
+            asyncio.create_task(process_with_semaphore(qa_pair, i))
+            for i, qa_pair in enumerate(qa_data)
+        ]
+
+        # Process with progress bar using as_completed
+        try:
+            from tqdm.asyncio import tqdm as atqdm
+            use_async_tqdm = True
+        except ImportError:
+            print("tqdm.asyncio not available, using regular progress tracking")
+            use_async_tqdm = False
+            atqdm = None
+
+        results = []
+        if use_async_tqdm and atqdm:
+            for task in atqdm.as_completed(tasks, total=len(tasks), desc="Processing QA pairs"):
+                updated_qa_pair, idx = await task
+                qa_data[idx] = updated_qa_pair
+                results.append((updated_qa_pair, idx))
+        else:
+            # Fallback manual progress tracking
+            from tqdm import tqdm
+            pbar = tqdm(total=len(tasks), desc="Processing QA pairs")
+            for task in asyncio.as_completed(tasks):
+                updated_qa_pair, idx = await task
+                qa_data[idx] = updated_qa_pair
+                results.append((updated_qa_pair, idx))
+                pbar.update(1)
+            pbar.close()
+
+        process_time = loop.time() - t1
+        print(f"QA processing completed in {process_time:.1f} seconds ({process_time/len(qa_data):.1f}s per question)")
+
+        # Evaluate with judge (keep sync for now, or make async if judge supports it)
+        print("Evaluating answers using LLM judge...")
+        judge = judge_llm if judge_llm is not None else self.judge_llm
+
+        # If judge supports async, use async evaluation
+        if hasattr(judge, 'ainvoke'):
+            evaluation_results = await self._evaluate_with_judge_async(judge, qa_data)
+        else:
+            # Run sync evaluation in executor
+            evaluation_results = await loop.run_in_executor(
+                None,
+                self._evaluate_with_judge,
+                judge,
+                qa_data
+            )
+
+        # Get judge model name
+        judge_model_name = judge.get_model_name() if hasattr(judge, 'get_model_name') else model_name
+
+        # Compile and save results
+        results = self._compile_results(
+            qa_data, evaluation_results, model_name, judge_model_name,
+            process_time, question_improvement_tokens=question_improvement_tokens, **kwargs
+        )
+
+        # Save results (run in executor to avoid blocking)
+        _ = await loop.run_in_executor(None, self._save_results, results)
+
+        # Print summary
+        self._print_summary(evaluation_results, judge_model_name)
+
+        return results
+
+    async def _evaluate_with_judge_async(self, judge_llm: Any, qa_data: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """
+        Async version of evaluation with judge using AsyncLLMJudgeEvaluator.
+        """
+        from async_evaluation import evaluate_with_llm_judge_async
+
+        # Get formatter type from subclass if specified
+        formatter_type = self.get_evaluation_formatter_type()
+
+        return await evaluate_with_llm_judge_async(
+            judge_llm,
+            qa_data,
+            self.prompts_dict,
+            judge_prompt_key=self.get_judge_prompt_key(),
+            formatter_type=formatter_type
+        )
 
     # ===== Internal Methods =====
 
