@@ -151,11 +151,11 @@ class FinQAPipeline(BaseMapReduceQA):
             return super().improve_question(original_question)
 
     def _compile_results(self, qa_data: List[Dict], evaluation_results: Dict,
-                        model_name: str, judge_model_name: str, process_time: float, **kwargs) -> Dict:
+                        model_name: str, judge_model_name: str, process_time: float, doc_load_time: float, **kwargs) -> Dict:
         """
         Override to add dataset and format-specific configuration.
         """
-        results = super()._compile_results(qa_data, evaluation_results, model_name, judge_model_name, process_time, **kwargs)
+        results = super()._compile_results(qa_data, evaluation_results, model_name, judge_model_name, process_time, doc_load_time, **kwargs)
 
         # Add dataset-specific config
         results["configuration"] = self.dataset_loader.add_dataset_config(results["configuration"])

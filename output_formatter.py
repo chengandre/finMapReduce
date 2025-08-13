@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
 from typing import Dict, List, Any, Union, Optional, Tuple
+import asyncio
 
 
 class OutputFormatter(ABC):
@@ -170,3 +171,48 @@ class OutputFormatter(ABC):
         """
         config["approach"] = "MapReduce"
         return config
+
+    # Async methods with default implementations
+    async def invoke_llm_map_async(self, chunk: Any, question: str) -> Dict[str, Any]:
+        """
+        Async version of invoke_llm_map.
+
+        Default implementation falls back to sync version in executor.
+        Override in subclasses for better async performance.
+
+        Args:
+            chunk: Document chunk with page_content attribute
+            question: The question to answer
+
+        Returns:
+            Dictionary with format-specific response structure
+        """
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(
+            None,
+            self.invoke_llm_map,
+            chunk,
+            question
+        )
+
+    async def invoke_llm_reduce_async(self, formatted_results: Any, question: str) -> Any:
+        """
+        Async version of invoke_llm_reduce.
+
+        Default implementation falls back to sync version in executor.
+        Override in subclasses for better async performance.
+
+        Args:
+            formatted_results: Formatted map results
+            question: The original question
+
+        Returns:
+            Format-specific response object
+        """
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(
+            None,
+            self.invoke_llm_reduce,
+            formatted_results,
+            question
+        )

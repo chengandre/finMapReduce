@@ -23,8 +23,8 @@ class BaseMapReduceQA(ABC):
                  prompts_dict: Dict[str, Any],
                  chunk_size: int = 36000,
                  chunk_overlap: int = 1000,
-                 max_concurrent_qa: int = 40,
-                 max_concurrent_chunks: int = 40,
+                 max_concurrent_qa: int = 150,
+                 max_concurrent_chunks: int = 150,
                  map_llm: Optional[Any] = None,
                  reduce_llm: Optional[Any] = None,
                  judge_llm: Optional[Any] = None):
@@ -163,7 +163,78 @@ class BaseMapReduceQA(ABC):
 
     # ===== Core Workflow Methods =====
 
-    def process_single_qa(self, qa_pair: Dict[str, Any]) -> Dict[str, Any]:
+    def _batch_load_documents(self, qa_data: List[Dict[str, Any]]) -> Dict[str, Tuple[List[Any], int]]:
+        """
+        Batch load all unique documents in parallel using ThreadPool (sync version).
+
+        Args:
+            qa_data: List of QA pairs containing document identifiers
+
+        Returns:
+            Dictionary mapping document identifiers to (docs, token_count) tuples
+        """
+        # Extract unique document identifiers
+        unique_docs = {}
+        for qa_pair in qa_data:
+            doc_id = self.get_document_identifier(qa_pair)
+            if doc_id not in unique_docs:
+                unique_docs[doc_id] = qa_pair
+
+        print(f"Loading {len(unique_docs)} unique documents in parallel...")
+
+        document_cache = {}
+
+        def load_single_document(doc_item):
+            doc_id, qa_pair = doc_item
+            try:
+                docs, token_count = self.load_document_chunks(qa_pair)
+                return doc_id, (docs, token_count), None
+            except Exception as e:
+                return doc_id, None, str(e)
+
+        # Use ThreadPoolExecutor for I/O bound document loading
+        with concurrent.futures.ThreadPoolExecutor(max_workers=len(unique_docs)) as executor:
+            # Submit all loading tasks
+            futures = {
+                executor.submit(load_single_document, doc_item): doc_item[0]
+                for doc_item in unique_docs.items()
+            }
+
+            # Collect results with progress bar
+            try:
+                from tqdm import tqdm
+                pbar = tqdm(total=len(futures), desc="Loading documents")
+
+                for future in concurrent.futures.as_completed(futures):
+                    doc_id, result, error = future.result()
+                    if error:
+                        print(f"Error loading document {doc_id}: {error}")
+                        # Store empty result for failed documents
+                        document_cache[doc_id] = ([], 0)
+                    else:
+                        document_cache[doc_id] = result
+                    pbar.update(1)
+                    pbar.set_postfix({"loaded": len([k for k, v in document_cache.items() if v[0]])})
+
+                pbar.close()
+            except ImportError:
+                # Fallback without progress bar
+                for future in concurrent.futures.as_completed(futures):
+                    doc_id, result, error = future.result()
+                    if error:
+                        print(f"Error loading document {doc_id}: {error}")
+                        document_cache[doc_id] = ([], 0)
+                    else:
+                        document_cache[doc_id] = result
+
+        # Report loading statistics
+        successful_loads = len([k for k, v in document_cache.items() if v[0]])
+        failed_loads = len(document_cache) - successful_loads
+        print(f"Document loading completed: {successful_loads} successful, {failed_loads} failed")
+
+        return document_cache
+
+    def process_single_qa(self, qa_pair: Dict[str, Any], document_cache: Optional[Dict[str, Tuple[List[Any], int]]] = None) -> Dict[str, Any]:
         """
         Process a single QA pair through the MapReduce pipeline.
 
@@ -172,6 +243,7 @@ class BaseMapReduceQA(ABC):
 
         Args:
             qa_pair: Dictionary containing question and document information
+            document_cache: Optional cache of preloaded documents {doc_identifier: (docs, token_count)}
 
         Returns:
             Updated qa_pair dictionary with results and statistics
@@ -180,9 +252,17 @@ class BaseMapReduceQA(ABC):
         question = qa_pair["question"]
         map_question = self.get_map_question(qa_pair=qa_pair)
 
-        # Step 1: Load document chunks
+        # Step 1: Get document chunks (from cache or load)
         try:
-            docs, token_count = self.load_document_chunks(qa_pair)
+            if document_cache is not None:
+                doc_identifier = self.get_document_identifier(qa_pair)
+                if doc_identifier in document_cache:
+                    docs, token_count = document_cache[doc_identifier]
+                else:
+                    return self._handle_document_error(qa_pair, f"Document {doc_identifier} not found in cache")
+            else:
+                # Fallback to loading individually
+                docs, token_count = self.load_document_chunks(qa_pair)
         except Exception as e:
             print(f"Error loading document for {self.get_document_identifier(qa_pair)}: {e}")
             return self._handle_document_error(qa_pair, str(e))
@@ -249,6 +329,13 @@ class BaseMapReduceQA(ABC):
         # Print document information
         self._print_document_info(qa_data)
 
+        # Batch load all documents in parallel
+        print("Batch loading documents...")
+        doc_load_start = time.time()
+        document_cache = self._batch_load_documents(qa_data)
+        doc_load_time = time.time() - doc_load_start
+        print(f"Loaded {len(document_cache)} unique documents in {doc_load_time:.1f} seconds")
+
         # Preprocess questions in parallel if enabled
         question_improvement_tokens = {"input_tokens": 0, "output_tokens": 0, "cache_read_tokens": 0}
         if kwargs.get('preprocess_questions', False):
@@ -260,7 +347,7 @@ class BaseMapReduceQA(ABC):
         # Process QA pairs in parallel
         with concurrent.futures.ThreadPoolExecutor(max_workers=min(len(qa_data),self.max_concurrent_qa)) as executor:
             future_to_qa = {
-                executor.submit(self.process_single_qa, qa_pair): i
+                executor.submit(self.process_single_qa, qa_pair, document_cache): i
                 for i, qa_pair in enumerate(qa_data)
             }
 
@@ -291,7 +378,7 @@ class BaseMapReduceQA(ABC):
         judge_model_name = judge.get_model_name() if hasattr(judge, 'get_model_name') else model_name
 
         # Compile and save results
-        results = self._compile_results(qa_data, evaluation_results, model_name, judge_model_name, process_time, question_improvement_tokens=question_improvement_tokens, **kwargs)
+        results = self._compile_results(qa_data, evaluation_results, model_name, judge_model_name, process_time, doc_load_time, question_improvement_tokens=question_improvement_tokens, **kwargs)
         results_file = self._save_results(results)
 
         # Print summary
@@ -301,16 +388,87 @@ class BaseMapReduceQA(ABC):
 
     # ===== Async Methods =====
 
+    async def _batch_load_documents_async(self, qa_data: List[Dict[str, Any]]) -> Dict[str, Tuple[List[Any], int]]:
+        """
+        Batch load all unique documents in parallel using ThreadPool.
+
+        Args:
+            qa_data: List of QA pairs containing document identifiers
+
+        Returns:
+            Dictionary mapping document identifiers to (docs, token_count) tuples
+        """
+        # Extract unique document identifiers
+        unique_docs = {}
+        for qa_pair in qa_data:
+            doc_id = self.get_document_identifier(qa_pair)
+            if doc_id not in unique_docs:
+                unique_docs[doc_id] = qa_pair
+
+        print(f"Loading {len(unique_docs)} unique documents in parallel...")
+
+        # Load documents in parallel using ThreadPool
+        loop = asyncio.get_running_loop()
+        document_cache = {}
+
+        def load_single_document(doc_item):
+            doc_id, qa_pair = doc_item
+            try:
+                docs, token_count = self.load_document_chunks(qa_pair)
+                return doc_id, (docs, token_count), None
+            except Exception as e:
+                return doc_id, None, str(e)
+
+        # Use ThreadPoolExecutor for I/O bound document loading
+        with concurrent.futures.ThreadPoolExecutor(max_workers=len(unique_docs)) as executor:
+            # Submit all loading tasks
+            futures = {
+                executor.submit(load_single_document, doc_item): doc_item[0]
+                for doc_item in unique_docs.items()
+            }
+
+            # Collect results with progress bar
+            try:
+                from tqdm import tqdm
+                pbar = tqdm(total=len(futures), desc="Loading documents")
+
+                for future in concurrent.futures.as_completed(futures):
+                    doc_id, result, error = future.result()
+                    if error:
+                        print(f"Error loading document {doc_id}: {error}")
+                        # Store empty result for failed documents
+                        document_cache[doc_id] = ([], 0)
+                    else:
+                        document_cache[doc_id] = result
+                    pbar.update(1)
+                    pbar.set_postfix({"loaded": len([k for k, v in document_cache.items() if v[0]])})
+
+                pbar.close()
+            except ImportError:
+                # Fallback without progress bar
+                for future in concurrent.futures.as_completed(futures):
+                    doc_id, result, error = future.result()
+                    if error:
+                        print(f"Error loading document {doc_id}: {error}")
+                        document_cache[doc_id] = ([], 0)
+                    else:
+                        document_cache[doc_id] = result
+
+        # Report loading statistics
+        successful_loads = len([k for k, v in document_cache.items() if v[0]])
+        failed_loads = len(document_cache) - successful_loads
+        print(f"Document loading completed: {successful_loads} successful, {failed_loads} failed")
+
+        return document_cache
+
     async def invoke_llm_map_async(self, chunk: Any, question: str) -> Dict[str, Any]:
         """
         Async version of invoke_llm_map.
         Default implementation uses executor for backward compatibility.
         Subclasses can override for true async.
         """
-        if hasattr(self.map_llm, 'ainvoke'):
-            # If LLM supports async, subclass should override this method
-            # to use it properly with specific prompt handling
-            pass
+        # For AsyncLLMClient, subclass should override this method
+        # to use it properly with specific prompt handling
 
         # Fallback to sync version in thread
         loop = asyncio.get_running_loop()
@@ -326,9 +484,8 @@ class BaseMapReduceQA(ABC):
         Async version of invoke_llm_reduce.
         Default implementation uses executor for backward compatibility.
         """
-        if hasattr(self.reduce_llm, 'ainvoke'):
-            # Subclass should override if using async LLM
-            pass
+        # For AsyncLLMClient, subclass should override this method
+        # to use it properly with specific prompt handling
 
         # Fallback to sync version in thread
         loop = asyncio.get_running_loop()
@@ -344,21 +501,18 @@ class BaseMapReduceQA(ABC):
         loop = asyncio.get_running_loop()
         map_start_time = loop.time()
 
-        # Use semaphore to limit concurrency (not len(docs)!)
-        semaphore = asyncio.Semaphore(min(self.max_concurrent_chunks, len(docs)))
-
-        async def process_chunk_with_limit(chunk, index):
-            async with semaphore:
-                try:
-                    result = await self.invoke_llm_map_async(chunk, question)
-                    return index, result
-                except Exception as e:
-                    print(f"Error in map phase for chunk {index}: {e}")
-                    return index, {"error": str(e), "content": ""}
+        # Process chunks without semaphore (rate limiting handled in async_llm_client.py)
+        async def process_chunk(chunk, index):
+            try:
+                result = await self.invoke_llm_map_async(chunk, question)
+                return index, result
+            except Exception as e:
+                print(f"Error in map phase for chunk {index}: {e}")
+                return index, {"error": str(e), "content": ""}
 
         # Create tasks
         tasks = [
-            asyncio.create_task(process_chunk_with_limit(chunk, i))
+            asyncio.create_task(process_chunk(chunk, i))
             for i, chunk in enumerate(docs)
         ]
 
@@ -401,22 +555,29 @@ class BaseMapReduceQA(ABC):
 
         return result_final, tokens, reduce_time
 
-    async def process_single_qa_async(self, qa_pair: Dict[str, Any]) -> Dict[str, Any]:
+    async def process_single_qa_async(self, qa_pair: Dict[str, Any], document_cache: Optional[Dict[str, Tuple[List[Any], int]]] = None) -> Dict[str, Any]:
         """
         Async version of process_single_qa.
         Reuses most of the sync logic but with async map/reduce phases.
+
+        Args:
+            qa_pair: QA pair to process
+            document_cache: Optional cache of preloaded documents {doc_identifier: (docs, token_count)}
         """
         question = qa_pair["question"]
         map_question = self.get_map_question(qa_pair=qa_pair)
 
-        # Step 1: Load document chunks (keep sync, run in executor if needed)
+        # Step 1: Get document chunks (from cache or load)
         try:
-            loop = asyncio.get_running_loop()
-            docs, _ = await loop.run_in_executor(
-                None,
-                self.load_document_chunks,
-                qa_pair
-            )
+            if document_cache is not None:
+                doc_identifier = self.get_document_identifier(qa_pair)
+                if doc_identifier in document_cache:
+                    docs, token_count = document_cache[doc_identifier]
+                else:
+                    return self._handle_document_error(qa_pair, f"Document {doc_identifier} not found in cache")
+            else:
+                # Fallback to loading individually
+                docs, token_count = self.load_document_chunks(qa_pair)
         except Exception as e:
             print(f"Error loading document for {self.get_document_identifier(qa_pair)}: {e}")
             return self._handle_document_error(qa_pair, str(e))
@@ -473,30 +634,35 @@ class BaseMapReduceQA(ABC):
         # Print document information
         self._print_document_info(qa_data)
 
+        # Batch load all documents in parallel
+        print("Batch loading documents...")
+        loop = asyncio.get_running_loop()
+        doc_load_start = loop.time()
+        document_cache = await self._batch_load_documents_async(qa_data)
+        doc_load_time = loop.time() - doc_load_start
+        print(f"Loaded {len(document_cache)} unique documents in {doc_load_time:.1f} seconds")
+
         # TODO: Implement async question preprocessing if needed
         question_improvement_tokens = {"input_tokens": 0, "output_tokens": 0, "cache_read_tokens": 0}
 
         loop = asyncio.get_running_loop()
         t1 = loop.time()
-        print(f"Processing {len(qa_data)} QA pairs with max {self.max_concurrent_qa} concurrent...")
+        print(f"Processing {len(qa_data)} QA pairs")
 
-        # Process QA pairs with semaphore for concurrency control
-        semaphore = asyncio.Semaphore(min(self.max_concurrent_qa, len(qa_data)))
-
-        async def process_with_semaphore(qa_pair, idx):
-            async with semaphore:
-                try:
-                    return await self.process_single_qa_async(qa_pair), idx
-                except Exception as e:
-                    print(f"Error processing QA pair {idx+1}: {e}")
-                    qa_pair["llm_answer"] = "Error during processing"
-                    qa_pair["error"] = str(e)
-                    qa_pair["token_stats"] = self._empty_token_stats()
-                    return qa_pair, idx
+        # Process QA pairs without semaphore (rate limiting handled in async_llm_client.py)
+        async def process_qa_pair(qa_pair, idx):
+            try:
+                return await self.process_single_qa_async(qa_pair, document_cache), idx
+            except Exception as e:
+                print(f"Error processing QA pair {idx+1}: {e}")
+                qa_pair["llm_answer"] = "Error during processing"
+                qa_pair["error"] = str(e)
+                qa_pair["token_stats"] = self._empty_token_stats()
+                return qa_pair, idx
 
         # Create tasks
         tasks = [
-            asyncio.create_task(process_with_semaphore(qa_pair, i))
+            asyncio.create_task(process_qa_pair(qa_pair, i))
             for i, qa_pair in enumerate(qa_data)
         ]
 
@@ -533,8 +699,8 @@ class BaseMapReduceQA(ABC):
         print("Evaluating answers using LLM judge...")
         judge = judge_llm if judge_llm is not None else self.judge_llm
 
-        # If judge supports async, use async evaluation
-        if hasattr(judge, 'ainvoke'):
+        # Check if judge is AsyncLLMClient (has async invoke method)
+        if hasattr(judge, 'invoke') and asyncio.iscoroutinefunction(judge.invoke):
             evaluation_results = await self._evaluate_with_judge_async(judge, qa_data)
         else:
             # Run sync evaluation in executor
@@ -551,7 +717,7 @@ class BaseMapReduceQA(ABC):
         # Compile and save results
         results = self._compile_results(
             qa_data, evaluation_results, model_name, judge_model_name,
-            process_time, question_improvement_tokens=question_improvement_tokens, **kwargs
+            process_time, doc_load_time, question_improvement_tokens=question_improvement_tokens, **kwargs
         )
 
         # Save results (run in executor to avoid blocking)
@@ -720,7 +886,7 @@ class BaseMapReduceQA(ABC):
         return qa_pair
 
     def _empty_token_stats(self) -> Dict[str, Any]:
-        """Return empty token statistics structure."""
+        """Return empty token statistics structure. Note: Document loading time tracked separately at dataset level."""
         return {
             "len_docs": 0,
             "map_phase": {"input_tokens": 0, "output_tokens": 0, "cache_read_tokens": 0},
@@ -910,7 +1076,7 @@ class BaseMapReduceQA(ABC):
         return effectiveness
 
     def _compile_results(self, qa_data: List[Dict], evaluation_results: Dict,
-                        model_name: str, judge_model_name: str, process_time: float, **kwargs) -> Dict:
+                        model_name: str, judge_model_name: str, process_time: float, doc_load_time: float, **kwargs) -> Dict:
         """Compile final results dictionary."""
         from utils import calculate_token_usage_summary, calculate_accuracy_by_question_type, calculate_accuracy_by_question_reasoning
 
@@ -928,6 +1094,8 @@ class BaseMapReduceQA(ABC):
 
         # Calculate timing averages
         timing_averages = self._calculate_timing_averages(qa_data)
+        timing_averages["document_loading_time"] = doc_load_time
+        timing_averages["total_pipeline_time"] = process_time + doc_load_time
 
         # Calculate filtering effectiveness
         filtering_effectiveness = self._calculate_filtering_effectiveness(qa_data)
@@ -964,6 +1132,7 @@ class BaseMapReduceQA(ABC):
             },
             "execution_time": datetime.now().isoformat(),
             "time_taken": process_time,
+            "document_loading_time": doc_load_time,
             "num_samples": len(qa_data),
             "token_usage_summary": token_summary,
             "phase_token_totals": phase_token_totals,

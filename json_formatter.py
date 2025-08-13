@@ -174,7 +174,7 @@ class JSONFormatter(OutputFormatter):
             Dictionary with 'json' and 'raw_response' keys
         """
         map_prompt = self.prompts_dict['map_prompt']
-        
+
         # Check if the LLM client supports async
         if hasattr(self.map_llm, 'ainvoke') or hasattr(self.map_llm, 'invoke') and asyncio.iscoroutinefunction(self.map_llm.invoke):
             return await self.map_llm.invoke(map_prompt, context=chunk.page_content, final_query=question)
@@ -200,7 +200,7 @@ class JSONFormatter(OutputFormatter):
             Dictionary with 'json' and 'raw_response' keys
         """
         reduce_prompt = self.prompts_dict['reduce_prompt']
-        
+
         # Check if the LLM client supports async
         if hasattr(self.reduce_llm, 'ainvoke') or hasattr(self.reduce_llm, 'invoke') and asyncio.iscoroutinefunction(self.reduce_llm.invoke):
             return await self.reduce_llm.invoke(reduce_prompt, map_results=formatted_results, final_query=question)

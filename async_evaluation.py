@@ -55,11 +55,12 @@ class AsyncLLMJudgeEvaluator:
         context = "<evaluation_items>\n" + "\n".join(context_parts) + "\n</evaluation_items>"
 
         try:
-            # Check if LLM supports async
-            if hasattr(self.llm, 'ainvoke'):
-                judge_response = await self.llm.ainvoke(self.judge_prompt, context=context)
+            # For AsyncLLMClient, always use its async invoke method
+            if hasattr(self.llm, 'invoke') and asyncio.iscoroutinefunction(self.llm.invoke):
+                # This is AsyncLLMClient - use its async invoke method
+                judge_response = await self.llm.invoke(self.judge_prompt, context=context)
             else:
-                # Fallback to sync in executor
+                # This is a sync LLM client - fallback to sync in executor
                 loop = asyncio.get_running_loop()
                 judge_response = await loop.run_in_executor(
                     None,
@@ -108,16 +109,10 @@ class AsyncLLMJudgeEvaluator:
                                     formatter: Any) -> List[Dict[str, Any]]:
         """Process all batches asynchronously with concurrency control"""
 
-        # Use semaphore for concurrency control
-        semaphore = asyncio.Semaphore(self.max_workers)
-
-        async def process_with_semaphore(batch_data):
-            async with semaphore:
-                return await self._process_single_batch_async(batch_data, formatter)
-
+        # Process batches without semaphore (rate limiting handled in async_llm_client.py)
         # Create tasks
         tasks = [
-            asyncio.create_task(process_with_semaphore(batch_data))
+            asyncio.create_task(self._process_single_batch_async(batch_data, formatter))
             for batch_data in batches
         ]
 
@@ -149,7 +144,7 @@ class AsyncLLMJudgeEvaluator:
     def _prepare_batches(self, qa_data, formatter):
         """Prepare batches for evaluation - reuse from sync version"""
         from evaluation import LLMJudgeEvaluator
-        
+
         # Create a temporary evaluator instance to access the method
         temp_evaluator = LLMJudgeEvaluator(self.llm, self.judge_prompt, self.batch_size)
         return temp_evaluator._prepare_batches(qa_data, formatter)
@@ -157,7 +152,7 @@ class AsyncLLMJudgeEvaluator:
     def _apply_results_to_qa_data(self, qa_data, batch_results):
         """Apply results back to qa_data - reuse from sync version"""
         from evaluation import LLMJudgeEvaluator
-        
+
         # Create a temporary evaluator instance to access the method
         temp_evaluator = LLMJudgeEvaluator(self.llm, self.judge_prompt, self.batch_size)
         return temp_evaluator._apply_results_to_qa_data(qa_data, batch_results)
@@ -165,7 +160,7 @@ class AsyncLLMJudgeEvaluator:
     def _calculate_statistics(self, qa_data, batch_results):
         """Calculate statistics - reuse from sync version"""
         from evaluation import LLMJudgeEvaluator
-        
+
         # Create a temporary evaluator instance to access the method
         temp_evaluator = LLMJudgeEvaluator(self.llm, self.judge_prompt, self.batch_size)
         return temp_evaluator._calculate_statistics(qa_data, batch_results)
@@ -173,7 +168,7 @@ class AsyncLLMJudgeEvaluator:
     def _parse_judge_response(self, judge_response):
         """Parse judge response - reuse from sync version"""
         from evaluation import LLMJudgeEvaluator
-        
+
         # Create a temporary evaluator instance to access the method
         temp_evaluator = LLMJudgeEvaluator(self.llm, self.judge_prompt, self.batch_size)
         return temp_evaluator._parse_judge_response(judge_response)
@@ -181,7 +176,7 @@ class AsyncLLMJudgeEvaluator:
     def _extract_token_usage_from_response(self, response):
         """Extract token usage - reuse from sync version"""
         from evaluation import LLMJudgeEvaluator
-        
+
         # Create a temporary evaluator instance to access the method
         temp_evaluator = LLMJudgeEvaluator(self.llm, self.judge_prompt, self.batch_size)
         return temp_evaluator._extract_token_usage_from_response(response)
