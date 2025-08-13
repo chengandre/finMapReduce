@@ -2,15 +2,17 @@ import concurrent.futures
 import datetime
 import glob
 import json
-import multiprocessing
 import os
 import random
+import statistics
 import time
 
 from langchain.prompts import load_prompt
 from tqdm import tqdm
 
-from utils import RateLimitedGPT
+from utils import create_rate_limited_llm, RateLimitConfig
+import numpy as np
+from sklearn.metrics import precision_recall_fscore_support, confusion_matrix
 
 def load_all_samples():
     """Load all samples from all JSONL files in the results directory"""
@@ -123,8 +125,13 @@ def evaluate_judge_performance(judge_response_json, samples, raw_response=None):
         is_correct = judgment == true_label
         correct += int(is_correct)
         if not is_correct:
-            # Store sample index (1-based), judge's judgment, true label, and the full sample
-            incorrect_judgments.append((i+1, judgment, true_label, samples[i]))
+            # Store sample index (1-based), judge's judgment, true label, the full sample, and the judge's full evaluation result
+            judge_eval_result = evaluation_results[i] if i < len(evaluation_results) else {}
+            incorrect_judgments.append((i+1, judgment, true_label, samples[i], judge_eval_result))
+
+    # Calculate precision, recall, F1, and confusion matrix
+    precision_recall_f1 = calculate_precision_recall_f1(true_labels, judgments)
+    confusion_matrix_data = generate_confusion_matrix(true_labels, judgments)
 
     # Return the results as a dictionary
     accuracy = correct / len(samples) if samples else 0
@@ -133,7 +140,9 @@ def evaluate_judge_performance(judge_response_json, samples, raw_response=None):
         "accuracy": accuracy,
         "correct": correct,
         "total": len(samples),
-        "incorrect_judgments": incorrect_judgments
+        "incorrect_judgments": incorrect_judgments,
+        "precision_recall_f1": precision_recall_f1,
+        "confusion_matrix": confusion_matrix_data
     }
 
 def analyze_results_by_label(judge_response_json, samples):
@@ -162,13 +171,116 @@ def analyze_results_by_label(judge_response_json, samples):
 
     return results_by_label
 
+def calculate_precision_recall_f1(y_true, y_pred, labels=None):
+    """Calculate precision, recall, and F1 score for multi-class classification"""
+    if labels is None:
+        labels = ["Correct", "Incorrect", "No answer"]
+
+    # Calculate per-class metrics
+    precision, recall, f1, support = precision_recall_fscore_support(
+        y_true, y_pred, labels=labels, average=None, zero_division=0
+    )
+
+    # Calculate macro averages
+    macro_precision, macro_recall, macro_f1, _ = precision_recall_fscore_support(
+        y_true, y_pred, labels=labels, average='macro', zero_division=0
+    )
+
+    # Calculate micro averages
+    micro_precision, micro_recall, micro_f1, _ = precision_recall_fscore_support(
+        y_true, y_pred, labels=labels, average='micro', zero_division=0
+    )
+
+    # Create per-class results
+    per_class_metrics = {}
+    for i, label in enumerate(labels):
+        # Handle both array and scalar cases safely
+        try:
+            if isinstance(precision, (list, tuple, np.ndarray)) and i < len(precision):
+                prec_val = precision[i]
+            else:
+                prec_val = float(precision) if precision is not None else 0.0
+        except:
+            prec_val = 0.0
+
+        try:
+            if isinstance(recall, (list, tuple, np.ndarray)) and i < len(recall):
+                rec_val = recall[i]
+            else:
+                rec_val = float(recall) if recall is not None else 0.0
+        except:
+            rec_val = 0.0
+
+        try:
+            if isinstance(f1, (list, tuple, np.ndarray)) and i < len(f1):
+                f1_val = f1[i]
+            else:
+                f1_val = float(f1) if f1 is not None else 0.0
+        except:
+            f1_val = 0.0
+
+        try:
+            if isinstance(support, (list, tuple, np.ndarray)) and i < len(support):
+                supp_val = support[i]
+            else:
+                supp_val = int(support) if support is not None else 0
+        except:
+            supp_val = 0
+
+        per_class_metrics[label] = {
+            "precision": float(prec_val),
+            "recall": float(rec_val),
+            "f1_score": float(f1_val),
+            "support": int(supp_val)
+        }
+
+    return {
+        "per_class": per_class_metrics,
+        "macro_avg": {
+            "precision": float(macro_precision),
+            "recall": float(macro_recall),
+            "f1_score": float(macro_f1)
+        },
+        "micro_avg": {
+            "precision": float(micro_precision),
+            "recall": float(micro_recall),
+            "f1_score": float(micro_f1)
+        }
+    }
+
+def generate_confusion_matrix(y_true, y_pred, labels=None):
+    """Generate confusion matrix for the predictions"""
+    if labels is None:
+        labels = ["Correct", "Incorrect", "No answer"]
+
+    # Generate confusion matrix
+    cm = confusion_matrix(y_true, y_pred, labels=labels)
+
+    # Convert to list for JSON serialization
+    cm_list = cm.tolist()
+
+    # Create detailed confusion matrix with labels
+    detailed_cm = {}
+    for i, true_label in enumerate(labels):
+        detailed_cm[f"True_{true_label}"] = {}
+        for j, pred_label in enumerate(labels):
+            detailed_cm[f"True_{true_label}"][f"Pred_{pred_label}"] = int(cm_list[i][j])
+
+    return {
+        "matrix": cm_list,
+        "labels": labels,
+        "detailed": detailed_cm
+    }
+
 def process_batch(batch_id, samples_batch, prompt_template, llm):
-    """Process a batch of samples using the RateLimitedGPT wrapper"""
+    """Process a batch of samples using the LLMClient wrapper"""
+    batch_start_time = time.time()
+
     # Format samples into context
     context = format_context(samples_batch)
 
     try:
-        response = llm(prompt_template, context=context)
+        response = llm.invoke(prompt_template, context=context)
 
         # Get both the parsed JSON and raw response from the wrapper
         judge_response_json = response.get('json', {})
@@ -192,16 +304,24 @@ def process_batch(batch_id, samples_batch, prompt_template, llm):
             label_results = analyze_results_by_label(judge_response_json, samples_batch)
             eval_results["label_results"] = label_results
 
-        # Add token usage to results
+        # Add token usage and timing to results
+        batch_end_time = time.time()
+        batch_processing_time = batch_end_time - batch_start_time
+
         eval_results["token_usage"] = token_usage
+        eval_results["batch_processing_time"] = batch_processing_time
 
         return eval_results
 
     except Exception as e:
+        batch_end_time = time.time()
+        batch_processing_time = batch_end_time - batch_start_time
+
         return {
             "success": False,
             "error": f"Error processing batch {batch_id}: {str(e)}",
-            "raw_response": str(e)
+            "raw_response": str(e),
+            "batch_processing_time": batch_processing_time
         }
 
 def main():
@@ -214,7 +334,7 @@ def main():
 
     # Test mode - limit to 20 samples
     test_mode = False  # Set to False to process all samples
-    max_samples = 20  # Number of samples to process in test mode
+    max_samples = 5  # Number of samples to process in test mode
 
     if test_mode:
         # Select a balanced subset of samples
@@ -264,9 +384,9 @@ def main():
 
     # Configure rate-limited LLM
     rate_limiter_config = {
-        "requests_per_minute": 500,
+        "requests_per_minute": 20,
         "tokens_per_minute": 4000000,
-        "request_burst_size": 50,
+        "request_burst_size": 5,
     }
 
     # rate_limiter_config = {
@@ -275,25 +395,20 @@ def main():
     #     "request_burst_size": 3000,
     # }
 
-    model_name = "openrouter/horizon-beta"
+    model_name = "deepseek/deepseek-r1-0528:free"
+    # model_name = "gpt-5"
 
-    llm = RateLimitedGPT(
+    rate_config = RateLimitConfig(**rate_limiter_config)
+    llm = create_rate_limited_llm(
         model_name=model_name,
         temperature=0.00,
         max_tokens=8192,
         provider="openrouter",
-        key="self",
-        rate_limit_config=rate_limiter_config
+        api_key_env="elm",
+        rate_limit_config=rate_config,
+        parse_json=True
     )
 
-    # llm = RateLimitedGPT(
-    #     model_name=model_name,
-    #     temperature=0.00,
-    #     max_tokens=8192,
-    #     provider="openai",
-    #     key="elm",
-    #     rate_limit_config=rate_limiter_config
-    # )
 
     # Batch size for processing
     batch_size = 5  # Each batch contains 5 samples as per the prompt format
@@ -307,7 +422,8 @@ def main():
 
     print(f"Processing {len(batches)} batches with {len(batches) * batch_size} samples total")
 
-    max_workers = 10
+    # Start overall timing
+    overall_start_time = time.time()
 
     # Initialize results
     total_correct = 0
@@ -327,8 +443,21 @@ def main():
     total_output_tokens = 0
     total_tokens = 0
 
+    # Initialize timing tracking
+    total_processing_time = 0
+    batch_processing_times = []
+
+    # Initialize batch-level token usage tracking for median calculations
+    batch_input_tokens = []
+    batch_output_tokens = []
+    batch_total_tokens = []
+
+    # Initialize aggregated metrics for final calculation
+    all_true_labels = []
+    all_predicted_labels = []
+
     # Process batches in parallel
-    with concurrent.futures.ThreadPoolExecutor(max_workers=50) as executor:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=480) as executor:
         # Submit all tasks
         future_to_batch = {
             executor.submit(process_batch, i, batch, prompt_template, llm): (i, batch)
@@ -363,9 +492,65 @@ def main():
                         # Update token usage
                         if "token_usage" in result:
                             token_usage = result["token_usage"]
-                            total_input_tokens += token_usage.get("input_tokens", 0)
-                            total_output_tokens += token_usage.get("output_tokens", 0)
-                            total_tokens += token_usage.get("total_tokens", 0)
+                            batch_input = token_usage.get("input_tokens", 0)
+                            batch_output = token_usage.get("output_tokens", 0)
+                            batch_total = token_usage.get("total_tokens", 0)
+
+                            total_input_tokens += batch_input
+                            total_output_tokens += batch_output
+                            total_tokens += batch_total
+
+                            # Track batch-level token usage for median calculations
+                            batch_input_tokens.append(batch_input)
+                            batch_output_tokens.append(batch_output)
+                            batch_total_tokens.append(batch_total)
+
+                        # Update timing statistics
+                        if "batch_processing_time" in result:
+                            batch_time = result["batch_processing_time"]
+                            batch_processing_times.append(batch_time)
+                            total_processing_time += batch_time
+
+                        # Collect labels for overall metrics calculation
+                        if "precision_recall_f1" in result:
+                            # Extract true and predicted labels from the batch for aggregation
+                            for sample in batch:
+                                true_label = sample['label']
+                                if true_label == "Correct Answer":
+                                    all_true_labels.append("Correct")
+                                elif true_label == "Incorrect Answer":
+                                    all_true_labels.append("Incorrect")
+                                elif true_label == "Refusal":
+                                    all_true_labels.append("No answer")
+
+                            # Get judgments from confusion matrix data for predicted labels
+                            if "confusion_matrix" in result and "matrix" in result["confusion_matrix"]:
+                                # Extract judgments from the result - we need to reconstruct them from the batch processing
+                                # This is a bit complex, but we can use the incorrect_judgments to help reconstruct
+                                batch_predicted_labels = []
+                                incorrect_judgments = result.get("incorrect_judgments", [])
+
+                                # Reconstruct predicted labels for this batch
+                                for i in range(result["total"]):
+                                    # Check if this sample index appears in incorrect_judgments
+                                    found_incorrect = False
+                                    for idx, judgment, true_label, sample, judge_answer in incorrect_judgments:
+                                        if idx == i + 1:  # incorrect_judgments uses 1-based indexing
+                                            batch_predicted_labels.append(judgment)
+                                            found_incorrect = True
+                                            break
+
+                                    if not found_incorrect:
+                                        # This was a correct judgment, so predicted = true
+                                        batch_true = batch[i]['label']
+                                        if batch_true == "Correct Answer":
+                                            batch_predicted_labels.append("Correct")
+                                        elif batch_true == "Incorrect Answer":
+                                            batch_predicted_labels.append("Incorrect")
+                                        elif batch_true == "Refusal":
+                                            batch_predicted_labels.append("No answer")
+
+                                all_predicted_labels.extend(batch_predicted_labels)
                     else:
                         # Check if it's a validation error or API error
                         error_msg = result.get('error', 'Unknown error')
@@ -384,6 +569,12 @@ def main():
                             api_errors += 1
                             print(f"\nAPI error in batch {batch_id}: {error_msg}")
 
+                        # Still collect timing information for failed batches
+                        if "batch_processing_time" in result:
+                            batch_time = result["batch_processing_time"]
+                            batch_processing_times.append(batch_time)
+                            total_processing_time += batch_time
+
                 except Exception as e:
                     api_errors += 1
                     print(f"\nUnexpected error in batch {batch_id}: {e}")
@@ -393,6 +584,18 @@ def main():
 
                 # Add a small delay to avoid rate limiting
                 time.sleep(0.1)
+
+    # Calculate overall processing time
+    overall_end_time = time.time()
+    overall_processing_time = overall_end_time - overall_start_time
+
+    # Calculate overall precision, recall, F1, and confusion matrix if we have data
+    overall_precision_recall_f1 = None
+    overall_confusion_matrix = None
+
+    if len(all_true_labels) > 0 and len(all_predicted_labels) > 0 and len(all_true_labels) == len(all_predicted_labels):
+        overall_precision_recall_f1 = calculate_precision_recall_f1(all_true_labels, all_predicted_labels)
+        overall_confusion_matrix = generate_confusion_matrix(all_true_labels, all_predicted_labels)
 
     # Print results
     print("\n===== Results =====")
@@ -421,6 +624,46 @@ def main():
         print(f"Average tokens per sample: {total_tokens / total_samples:.1f}")
         print(f"Average input tokens per sample: {total_input_tokens / total_samples:.1f}")
         print(f"Average output tokens per sample: {total_output_tokens / total_samples:.1f}")
+
+    # Print batch-level token statistics
+    if len(batch_input_tokens) > 0:
+        print(f"Median input tokens per batch: {statistics.median(batch_input_tokens):.1f}")
+        print(f"Median output tokens per batch: {statistics.median(batch_output_tokens):.1f}")
+        print(f"Median total tokens per batch: {statistics.median(batch_total_tokens):.1f}")
+
+    # Print timing statistics
+    print(f"\nProcessing Time Statistics:")
+    print(f"Overall processing time: {overall_processing_time:.2f} seconds")
+    if len(batch_processing_times) > 0:
+        avg_batch_time = sum(batch_processing_times) / len(batch_processing_times)
+        median_batch_time = statistics.median(batch_processing_times)
+        min_batch_time = min(batch_processing_times)
+        max_batch_time = max(batch_processing_times)
+        print(f"Average batch processing time: {avg_batch_time:.2f} seconds")
+        print(f"Median batch processing time: {median_batch_time:.2f} seconds")
+        print(f"Min batch processing time: {min_batch_time:.2f} seconds")
+        print(f"Max batch processing time: {max_batch_time:.2f} seconds")
+        if total_samples > 0:
+            avg_sample_time = total_processing_time / total_samples
+            print(f"Average processing time per sample: {avg_sample_time:.2f} seconds")
+
+    # Print precision, recall, F1 scores
+    if overall_precision_recall_f1:
+        print(f"\nOverall Classification Metrics:")
+        print(f"Macro-averaged Precision: {overall_precision_recall_f1['macro_avg']['precision']:.3f}")
+        print(f"Macro-averaged Recall: {overall_precision_recall_f1['macro_avg']['recall']:.3f}")
+        print(f"Macro-averaged F1-score: {overall_precision_recall_f1['macro_avg']['f1_score']:.3f}")
+        print(f"Micro-averaged Precision: {overall_precision_recall_f1['micro_avg']['precision']:.3f}")
+        print(f"Micro-averaged Recall: {overall_precision_recall_f1['micro_avg']['recall']:.3f}")
+        print(f"Micro-averaged F1-score: {overall_precision_recall_f1['micro_avg']['f1_score']:.3f}")
+
+        print(f"\nPer-class Metrics:")
+        for class_name, metrics in overall_precision_recall_f1['per_class'].items():
+            print(f"{class_name}:")
+            print(f"  Precision: {metrics['precision']:.3f}")
+            print(f"  Recall: {metrics['recall']:.3f}")
+            print(f"  F1-score: {metrics['f1_score']:.3f}")
+            print(f"  Support: {metrics['support']}")
 
     print("\nResults by label type:")
     for label, data in label_results_aggregate.items():
@@ -475,11 +718,12 @@ def main():
             "incorrect_judgments": []
         }
 
-        for idx, judgment, true_label, sample in all_incorrect:
+        for idx, judgment, true_label, sample, judge_answer in all_incorrect:
             judgment_entry = {
                 "sample_index": idx,
                 "judge_decision": judgment,
                 "true_label": true_label,
+                "judge_answer": judge_answer,
                 "sample_data": {
                     "question": sample['question'],
                     "model_answer": sample['model_answer'],
@@ -493,6 +737,8 @@ def main():
             json.dump(incorrect_judgments_data, f, indent=2, ensure_ascii=False)
 
         print(f"Incorrect judgments saved to {incorrect_judgments_file}")
+
+    accuracy = total_correct / total_samples if total_samples > 0 else 0
 
     # Save overall results summary
     results_summary_file = os.path.join(results_dir, f"llm_judge_results_{timestamp}.json")
@@ -515,8 +761,22 @@ def main():
             "total_tokens": total_tokens,
             "average_tokens_per_sample": total_tokens / total_samples if total_samples > 0 else 0,
             "average_input_tokens_per_sample": total_input_tokens / total_samples if total_samples > 0 else 0,
-            "average_output_tokens_per_sample": total_output_tokens / total_samples if total_samples > 0 else 0
+            "average_output_tokens_per_sample": total_output_tokens / total_samples if total_samples > 0 else 0,
+            "median_input_tokens_per_batch": statistics.median(batch_input_tokens) if batch_input_tokens else 0,
+            "median_output_tokens_per_batch": statistics.median(batch_output_tokens) if batch_output_tokens else 0,
+            "median_total_tokens_per_batch": statistics.median(batch_total_tokens) if batch_total_tokens else 0
         },
+        "processing_time": {
+            "overall_processing_time_seconds": overall_processing_time,
+            "average_batch_time_seconds": sum(batch_processing_times) / len(batch_processing_times) if batch_processing_times else 0,
+            "median_batch_time_seconds": statistics.median(batch_processing_times) if batch_processing_times else 0,
+            "min_batch_time_seconds": min(batch_processing_times) if batch_processing_times else 0,
+            "max_batch_time_seconds": max(batch_processing_times) if batch_processing_times else 0,
+            "average_time_per_sample_seconds": total_processing_time / total_samples if total_samples > 0 else 0,
+            "total_batches_processed": len(batch_processing_times)
+        },
+        "precision_recall_f1": overall_precision_recall_f1,
+        "confusion_matrix": overall_confusion_matrix,
         "accuracy_by_label": {}
     }
 

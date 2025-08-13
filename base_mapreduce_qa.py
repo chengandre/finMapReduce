@@ -475,7 +475,9 @@ class BaseMapReduceQA(ABC):
         )
 
     def _calculate_timing_averages(self, qa_data: List[Dict[str, Any]]) -> Dict[str, float]:
-        """Calculate average timing statistics from all QA pairs."""
+        """Calculate average and median timing statistics from all QA pairs."""
+        import statistics
+
         map_times = []
         reduce_times = []
         total_times = []
@@ -500,6 +502,9 @@ class BaseMapReduceQA(ABC):
             "average_map_phase_time": sum(map_times) / len(map_times) if map_times else 0.0,
             "average_reduce_phase_time": sum(reduce_times) / len(reduce_times) if reduce_times else 0.0,
             "average_total_mapreduce_time": sum(total_times) / len(total_times) if total_times else 0.0,
+            "median_map_phase_time": statistics.median(map_times) if map_times else 0.0,
+            "median_reduce_phase_time": statistics.median(reduce_times) if reduce_times else 0.0,
+            "median_total_mapreduce_time": statistics.median(total_times) if total_times else 0.0,
             "samples_with_timing": len(total_times)
         }
 
@@ -729,7 +734,7 @@ class BaseMapReduceQA(ABC):
         try:
             # Use the GPT wrapper's JSON parsing capability
             prompt = self.prompts_dict['question_improvement_prompt']
-            response = self.llm(prompt, question=original_question)
+            response = self.llm.invoke(prompt, question=original_question)
 
             # Extract token usage
             tokens = self._extract_token_usage_from_response(response)
