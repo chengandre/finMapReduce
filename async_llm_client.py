@@ -119,7 +119,7 @@ class AsyncLLMClient:
         retry_strategy: Optional[RetryStrategy] = None,
         prompt_logger: Optional[PromptLogger] = None,
         token_estimator: Optional[TokenEstimator] = None,
-        request_timeout: float = 60.0
+        request_timeout: float = 600.0
     ):
         self.config = config
         self.provider = LLMProviderFactory.create_provider(config)

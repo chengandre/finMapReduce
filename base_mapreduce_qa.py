@@ -507,8 +507,9 @@ class BaseMapReduceQA(ABC):
                 result = await self.invoke_llm_map_async(chunk, question)
                 return index, result
             except Exception as e:
-                print(f"Error in map phase for chunk {index}: {e}")
-                return index, {"error": str(e), "content": ""}
+                error_msg = str(e) if str(e).strip() else f"Unknown error: {type(e).__name__}"
+                print(f"Error in map phase for chunk {index}: {error_msg}")
+                return index, {"error": error_msg, "content": ""}
 
         # Create tasks
         tasks = [

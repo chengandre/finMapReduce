@@ -1,12 +1,8 @@
 import asyncio
 import argparse
-from pathlib import Path
-from typing import Optional
 
-from utils import LLMConfig, RateLimitConfig, load_prompt_set
+from utils import RateLimitConfig, load_prompt_set, create_rate_limited_llm
 from async_llm_client import (
-    create_async_simple_llm,
-    create_async_json_llm,
     create_async_rate_limited_llm
 )
 from factory import MapReducePipelineFactory
@@ -119,6 +115,7 @@ async def main_async():
     map_llm = None
     reduce_llm = None
     judge_llm = None
+    llm_client = None
 
     if args.dataset == 'financebench':
         if args.format_type == 'hybrid':
@@ -145,7 +142,6 @@ async def main_async():
                     enable_logging=args.enable_logging
                 )
             else:
-                from utils import create_rate_limited_llm
                 map_llm = create_rate_limited_llm(
                     model_name=args.model_name,
                     temperature=args.temperature,
@@ -203,7 +199,6 @@ async def main_async():
                     enable_logging=args.enable_logging
                 )
             else:
-                from utils import create_rate_limited_llm
                 llm_client = create_rate_limited_llm(
                     model_name=args.model_name,
                     temperature=args.temperature,
@@ -250,7 +245,6 @@ async def main_async():
                     enable_logging=args.enable_logging
                 )
             else:
-                from utils import create_rate_limited_llm
                 llm_client = create_rate_limited_llm(
                     model_name=args.model_name,
                     temperature=args.temperature,
@@ -314,8 +308,14 @@ async def main_async():
         print(f"  Map LLM: {args.model_name} (text output)")
         print(f"  Reduce LLM: {args.model_name} (JSON output)")
     else:
-        print(f"  Main LLM: {args.model_name} (JSON: {llm_client.response_processor.__class__.__name__ == 'JSONResponseProcessor'})")
-    print(f"  Judge LLM: {judge_llm.get_model_name() if hasattr(judge_llm, 'get_model_name') else 'unknown'}")
+        json_mode = 'unknown'
+        if llm_client and hasattr(llm_client, 'response_processor'):
+            json_mode = llm_client.response_processor.__class__.__name__ == 'JSONResponseProcessor'
+        print(f"  Main LLM: {args.model_name} (JSON: {json_mode})")
+    judge_model_name = 'unknown'
+    if judge_llm and hasattr(judge_llm, 'get_model_name'):
+        judge_model_name = judge_llm.get_model_name()
+    print(f"  Judge LLM: {judge_model_name}")
 
     # Create pipeline
     try:
@@ -401,17 +401,21 @@ async def main_async():
                 print(f"Judgment: {qa_item.get('judgment', 'N/A')}")
 
         # Print rate limiting stats if available
-        if hasattr(llm_client, 'get_stats'):
-            if args.use_async:
-                stats = await llm_client.get_stats()
-            else:
-                stats = llm_client.get_stats()
-
-            if stats:
-                print(f"\nRate limiting stats:")
-                print(f"  Total requests: {stats['total_requests']}")
-                print(f"  Total tokens: {stats['total_tokens']}")
-                print(f"  Total wait time: {stats['total_wait_time']:.2f}s")
+        if llm_client and hasattr(llm_client, 'get_stats'):
+            try:
+                # Try async first, then sync
+                if hasattr(llm_client.get_stats, '__call__') and asyncio.iscoroutinefunction(llm_client.get_stats):
+                    stats = await llm_client.get_stats()
+                else:
+                    stats = llm_client.get_stats()
+                
+                if stats:
+                    print(f"\nRate limiting stats:")
+                    print(f"  Total requests: {stats['total_requests']}")
+                    print(f"  Total tokens: {stats['total_tokens']}")
+                    print(f"  Total wait time: {stats['total_wait_time']:.2f}s")
+            except Exception as e:
+                print(f"\nCould not retrieve stats: {e}")
 
         return results
 

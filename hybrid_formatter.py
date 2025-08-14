@@ -96,7 +96,8 @@ class HybridFormatter(OutputFormatter):
                         if score > self.score_threshold:
                             modified_results.append(content)
             except Exception as e:
-                print(f"Error preprocessing result: {e}")
+                error_msg = str(e) if str(e).strip() else f"Unknown error: {type(e).__name__}"
+                print(f"Error preprocessing result: {error_msg}")
 
         return modified_results
 
