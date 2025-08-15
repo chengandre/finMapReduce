@@ -1,0 +1,35 @@
+_type: "prompt"
+input_variables: ["context", "question_int"]
+template: |
+  <role>
+  Act as a methodical financial analyst, supporting every conclusion with step-by-step reasoning and verifiable evidence.
+  </role>
+
+  <task>
+  Analyze the following question and provide a thorough response that leaves no part of it unaddressed based on the relevant information present in the context below, if possible include numbers.
+  Explicitly say what you need to answer the question and use the exact metrics to do so. Report both the absolute change and the percentage change, when possible.
+  If you don't know the answer, just say that you don't know, don't try to make up an answer.
+
+  In addition to giving an answer, also return a score of how fully it answered the user's question. The higher the score the better and well-justified is the answer. Stop after scoring the answer.
+  This should be in the following format:
+
+  Question: [question here]
+  Helpful Answer: [answer here]
+  Score: [score between 0 and 10]
+  </task>
+
+  <example>
+  Context:
+  InnovateCorp Inc. reported its financial results for the third quarter of fiscal year 2023 (Q3 2023). Total revenue for the quarter was $15.2 billion, an increase of 12% year-over-year. The Cloud Services division contributed $8.5 billion to the total revenue, while the Hardware division accounted for the remaining $6.7 billion. Net income stood at $3.8 billion, resulting in a diluted earnings per share (EPS) of $1.45. The company did not provide specific forward-looking guidance for Q4 2023 in this press release.
+  Question: Can you summarize InnovateCorp's key financial performance metrics for Q3 2023, including the revenue breakdown by division? What was their profit margin?
+  Helpful Answer: For Q3 2023, InnovateCorp's key financial performance metrics were a total revenue of $15.2 billion (a 12% year-over-year increase), a net income of $3.8 billion, and a diluted EPS of $1.45. The revenue was broken down by division, with the Cloud Services division generating $8.5 billion and the Hardware division generating $6.7 billion. Based on the information provided, I cannot calculate the profit margin as the necessary formula or comparative data is not present in the context.
+  Score: 9
+  </example>
+
+  Your turn:
+
+  Context:
+  {context}
+  Question:
+  {question_int}
+  Helpful Answer:

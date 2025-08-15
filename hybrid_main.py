@@ -32,7 +32,7 @@ def main():
                       help='Provider of the LLM')
     parser.add_argument('--max_concurrent_qa', type=int, default=150,
                       help='Maximum number of QA pairs to process concurrently')
-    parser.add_argument('--key', type=str, default=None,
+    parser.add_argument('--key', type=str, default="elm",
                       help='API key selector: "self" uses SELF_OPENAI_API_KEY, otherwise uses OPENAI_API_KEY')
     parser.add_argument('--prompt', type=str, default="hybrid",
                       help='Prompt set to use (hybrid for map_prompt_hybrid.yml and reduce_prompt_hybrid.yml)')
@@ -86,6 +86,7 @@ def main():
         parse_json=True
     )
 
+    judge_rate_config = rate_config
     judge = create_rate_limited_llm(
         model_name="gpt-5-nano",
         temperature=1.0,

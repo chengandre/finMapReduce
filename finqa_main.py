@@ -12,7 +12,7 @@ def main():
     os.makedirs(prompts_log_dir, exist_ok=True)
 
     parser = argparse.ArgumentParser(description="Run MapReduce QA on FinQA data with new architecture")
-    parser.add_argument('--json_path', type=str, default="../finqa_balanced_subset.json",
+    parser.add_argument('--json_path', type=str, default="../finqa_subset_test.json",
                       help='Path to the FinQA json file')
     parser.add_argument('--doc_dir', type=str, default="../edgartools_finqa",
                       help='Directory containing FinQA document markdown files')
@@ -24,29 +24,29 @@ def main():
                       help='Number of samples to process from the dataset')
     parser.add_argument('--temperature', type=float, default=0.00,
                       help='Temperature parameter for the LLM')
-    parser.add_argument('--chunk_size', type=int, default=36000,
+    parser.add_argument('--chunk_size', type=int, default=32768,
                       help='Size of each document chunk')
-    parser.add_argument('--chunk_overlap', type=int, default=1000,
+    parser.add_argument('--chunk_overlap', type=int, default=4096,
                       help='Overlap between chunks')
     parser.add_argument('--verbose', action='store_true',
                       help='Print detailed results for each QA pair')
-    parser.add_argument('--max_tokens', type=int, default=8000,
+    parser.add_argument('--max_tokens', type=int, default=8192,
                       help='Maximum number of tokens for the LLM')
     parser.add_argument('--provider', type=str, default="openai",
                       help='Provider of the LLM')
-    parser.add_argument('--max_concurrent_qa', type=int, default=20,
+    parser.add_argument('--max_concurrent_qa', type=int, default=150,
                       help='Maximum number of QA pairs to process concurrently')
-    parser.add_argument('--key', type=str, default=None,
+    parser.add_argument('--key', type=str, default="elm",
                       help='API key selector: "self" uses SELF_OPENAI_API_KEY, otherwise uses OPENAI_API_KEY')
     parser.add_argument('--prompt', type=str, default=None,
                       help='Prompt set to use (default, old, last_year, hybrid)')
-    parser.add_argument('--requests_per_minute', type=int, default=5000,
+    parser.add_argument('--requests_per_minute', type=int, default=30000,
                       help='Maximum requests per minute for rate limiting')
-    parser.add_argument('--tokens_per_minute', type=int, default=4000000,
+    parser.add_argument('--tokens_per_minute', type=int, default=150000000,
                       help='Maximum tokens per minute for rate limiting')
-    parser.add_argument('--request_burst_size', type=int, default=500,
+    parser.add_argument('--request_burst_size', type=int, default=3000,
                       help='Maximum burst size for requests')
-    parser.add_argument('--score_threshold', type=int, default=50,
+    parser.add_argument('--score_threshold', type=int, default=5,
                       help='Score threshold for filtering (plain_text and hybrid formats)')
     parser.add_argument('--comment', type=str, default=None,
                       help='Comment to save alongside the configuration')
@@ -71,6 +71,38 @@ def main():
         parse_json=True
     )
 
+        # Create LLM instances for hybrid approach
+    map_llm = create_rate_limited_llm(
+        model_name=args.model_name,
+        temperature=args.temperature,
+        max_tokens=args.max_tokens,
+        provider=args.provider,
+        api_key_env=args.key,
+        rate_limit_config=rate_config,
+        parse_json=False
+    )
+
+    reduce_llm = create_rate_limited_llm(
+        model_name=args.model_name,
+        temperature=args.temperature,
+        max_tokens=args.max_tokens,
+        provider=args.provider,
+        api_key_env=args.key,
+        rate_limit_config=rate_config,
+        parse_json=True
+    )
+
+    judge_rate_config = rate_config
+    judge = create_rate_limited_llm(
+        model_name="gpt-5-nano",
+        temperature=1.0,
+        max_tokens=8192,
+        provider="openai",
+        api_key_env=args.key,
+        rate_limit_config=judge_rate_config,
+        parse_json=True
+    )
+
     print(f"\nCONFIGURATION:")
     print(f"  Dataset: finqa")
     print(f"  Format type: {args.format_type}")
@@ -92,6 +124,8 @@ def main():
         dataset='finqa',
         format_type=args.format_type,
         llm=llm,
+        map_llm=map_llm,
+        reduce_llm=reduce_llm,
         prompts_dict=prompts_dict,
         doc_dir=args.doc_dir,
         score_threshold=args.score_threshold,
@@ -104,7 +138,7 @@ def main():
         data_path=args.json_path,
         model_name=args.model_name,
         num_samples=args.num_samples,
-        judge_llm=llm,
+        judge_llm=judge,
         comment=args.comment
     )
 

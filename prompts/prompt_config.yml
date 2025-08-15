@@ -40,5 +40,15 @@ prompt_sets:
     reduce_prompt: "prompts/reduce_prompt_last_year_json.yml"
     judge_prompt: "prompts/judge_prompt_last_year.yml"
 
+  direct:
+    map_prompt: "prompts/direct_prompt.yml"
+    reduce_prompt: "prompts/direct_prompt.yml"
+    judge_prompt: "prompts/judge_prompt.yml"
+
+  finqa:
+    map_prompt: "prompts/map_prompt_finqa.yml"
+    reduce_prompt: "prompts/reduce_prompt_finqa.yml"
+    judge_prompt: "prompts/judge_prompt.yml"
+
 # Default prompt set if none specified
 default_set: "default"

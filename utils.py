@@ -305,6 +305,11 @@ class RetryStrategy:
         if attempt >= self.max_retries:
             return False
 
+        # Check for specific timeout exceptions by type
+        import asyncio
+        if isinstance(error, (asyncio.TimeoutError, TimeoutError)):
+            return True
+
         error_str = str(error).lower()
         return any(err.lower() in error_str for err in self.retryable_errors)
 
@@ -709,7 +714,7 @@ def _load_document_cache(cache_path):
         documents = cache_data.get('documents', [])
         token_count = cache_data.get('token_count', 0)
 
-        print(f"Loaded document parsing results from cache: {cache_path}")
+        # print(f"Loaded document parsing results from cache: {cache_path}")
         return documents, token_count
 
     except Exception as e:
