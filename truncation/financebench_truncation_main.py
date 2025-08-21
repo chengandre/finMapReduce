@@ -19,7 +19,7 @@ from utils import create_rate_limited_llm, load_prompt_set, RateLimitConfig
 
 def main():
     """Main entry point for FinanceBench truncation baseline."""
-    
+
     # Clean up prompts log directory
     prompts_log_dir = "prompts_log"
     if os.path.exists(prompts_log_dir):
@@ -27,7 +27,7 @@ def main():
     os.makedirs(prompts_log_dir, exist_ok=True)
 
     parser = argparse.ArgumentParser(description="Run Truncation QA on FinanceBench data")
-    
+
     # Data and model arguments
     parser.add_argument('--jsonl_path', type=str, default="../financebench/data/financebench_open_source.jsonl",
                       help='Path to the FinanceBench JSONL file')
@@ -35,7 +35,7 @@ def main():
                       help='Name of the LLM model to use')
     parser.add_argument('--num_samples', type=int, default=None,
                       help='Number of samples to process from the dataset')
-    
+
     # LLM configuration
     parser.add_argument('--temperature', type=float, default=0.00,
                       help='Temperature parameter for the LLM')
@@ -45,7 +45,7 @@ def main():
                       help='Provider of the LLM (openai, openrouter, etc.)')
     parser.add_argument('--key', type=str, default="elm",
                       help='API key selector: "self" uses SELF_OPENAI_API_KEY, otherwise uses OPENAI_API_KEY')
-    
+
     # Truncation-specific arguments
     parser.add_argument('--truncation_strategy', type=str, default="start",
                       choices=TruncationPipelineFactory.get_available_strategies(),
@@ -56,15 +56,15 @@ def main():
                       help='Safety buffer for response tokens')
     parser.add_argument('--max_document_tokens', type=int, default=None,
                       help='Maximum tokens from document (None = auto-calculate)')
-    
+
     # Document processing
     parser.add_argument('--pdf_parser', type=str, default="marker",
                       help='PDF parsing method to use')
-    
+
     # Execution configuration
     parser.add_argument('--max_concurrent_qa', type=int, default=150,
                       help='Maximum number of QA pairs to process concurrently')
-    
+
     # Rate limiting
     parser.add_argument('--requests_per_minute', type=int, default=30000,
                       help='Maximum requests per minute for rate limiting')
@@ -72,11 +72,11 @@ def main():
                       help='Maximum tokens per minute for rate limiting')
     parser.add_argument('--request_burst_size', type=int, default=3000,
                       help='Maximum burst size for requests')
-    
+
     # Prompt configuration
     parser.add_argument('--prompt', type=str, default='direct',
                       help='Prompt set to use (default, old, last_year, etc.)')
-    
+
     # Output and debugging
     parser.add_argument('--verbose', action='store_true',
                       help='Print detailed results for each QA pair')
@@ -89,7 +89,8 @@ def main():
     rate_config = RateLimitConfig(
         requests_per_minute=args.requests_per_minute,
         tokens_per_minute=args.tokens_per_minute,
-        request_burst_size=args.request_burst_size
+        request_burst_size=args.request_burst_size,
+        token_burst_size=500000,
     )
 
     judge_rate_config = RateLimitConfig(
@@ -152,13 +153,13 @@ def main():
         pdf_parser=args.pdf_parser,
         max_document_tokens=args.max_document_tokens
     )
-    
+
     if not validation['valid']:
         print("\nConfiguration Errors:")
         for error in validation['errors']:
             print(f"  - {error}")
         return 1
-    
+
     if validation['warnings']:
         print("\nConfiguration Warnings:")
         for warning in validation['warnings']:
@@ -245,7 +246,7 @@ def main():
             print(f"LLM Answer: {qa_item['llm_answer']}")
             print(f"Golden Answer: {qa_item.get('answer', 'N/A')}")
             print(f"Judgment: {qa_item.get('judgment', 'N/A')}")
-            
+
             # Show truncation stats for this question
             token_stats = qa_item.get('token_stats', {})
             truncation_stats = token_stats.get('truncation_stats', {})

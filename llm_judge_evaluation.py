@@ -280,7 +280,8 @@ def process_batch(batch_id, samples_batch, prompt_template, llm):
     context = format_context(samples_batch)
 
     try:
-        response = llm.invoke(prompt_template, context=context)
+        prompt = prompt_template.format(context=context)
+        response = llm.invoke(prompt)
 
         # Get both the parsed JSON and raw response from the wrapper
         judge_response_json = response.get('json', {})

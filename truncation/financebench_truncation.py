@@ -19,7 +19,7 @@ from base_truncation_qa import BaseTruncationQA
 class FinanceBenchTruncation(BaseTruncationQA):
     """
     FinanceBench-specific implementation of truncation-based QA.
-    
+
     This implementation:
     - Loads data from FinanceBench JSONL format
     - Processes PDF documents using existing utilities
@@ -56,24 +56,24 @@ class FinanceBenchTruncation(BaseTruncationQA):
             List of QA pairs
         """
         qa_data = []
-        
+
         try:
             with open(data_path, 'r', encoding='utf-8') as f:
                 for line_num, line in enumerate(f, 1):
                     if num_samples and len(qa_data) >= num_samples:
                         break
-                    
+
                     line = line.strip()
                     if not line:
                         continue
-                    
+
                     try:
                         qa_item = json.loads(line)
                         qa_data.append(qa_item)
                     except json.JSONDecodeError as e:
                         print(f"Warning: Skipping malformed JSON on line {line_num}: {e}")
                         continue
-        
+
         except FileNotFoundError:
             raise FileNotFoundError(f"FinanceBench data file not found: {data_path}")
         except Exception as e:
@@ -106,19 +106,19 @@ class FinanceBenchTruncation(BaseTruncationQA):
                 chunk_overlap=0,
                 method=self.pdf_parser
             )
-            
+
             if not documents:
                 raise ValueError(f"No document content loaded for {doc_name}")
-            
+
             # Combine all chunks into single text (should typically be just one chunk)
-            full_text = "\n\n".join([doc.page_content if hasattr(doc, 'page_content') else str(doc) 
+            full_text = "\n\n".join([doc.page_content if hasattr(doc, 'page_content') else str(doc)
                                    for doc in documents])
-            
+
             # Count tokens in full document
             token_count = num_tokens_from_string(full_text, "cl100k_base")
-            
+
             return full_text, token_count
-            
+
         except Exception as e:
             raise Exception(f"Failed to load document {doc_name}: {e}")
 
@@ -210,11 +210,11 @@ class FinanceBenchTruncation(BaseTruncationQA):
                         "llm_reasoning": llm_result.get("reasoning", "Direct response"),
                         "llm_evidence": llm_result.get("evidence", [])
                     }
-            
+
             # Handle string response
             elif isinstance(llm_result, str):
                 return self._parse_text_response(llm_result)
-            
+
             # Handle other response types
             else:
                 content = str(llm_result)

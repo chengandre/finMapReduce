@@ -9,7 +9,7 @@ template: |
 
   <task>
   Analyze the following question and provide a thorough response that leaves no part of it unaddressed based on the relevant information present in the context below, if possible include numbers.
-  When asked about a change (increase or decrease), report both the absolute change and the percentage change; both can be negative.
+  Report both the absolute change and the percentage change, when possible.
   If you don't know the answer, just say that you don't know, don't try to make up an answer.
 
   In the context you have a list of facts along with their scores. Prioritize facts with higher scores, if they have the same score, choose the best justified one. Integrate complementary information from different facts.

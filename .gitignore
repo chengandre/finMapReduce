@@ -1,6 +1,7 @@
 *.pdf
 .env
 *.json
+*.jsonl
 __pycache__/
 *.md
 *.ipynb

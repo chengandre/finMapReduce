@@ -341,7 +341,7 @@ class LLMJudgeEvaluator:
 
         try:
             # Get judge response
-            judge_response = self.llm.invoke(self.judge_prompt, context=context)
+            judge_response = self.llm.invoke(self.judge_prompt.format(context=context))
 
             # Extract token usage
             tokens = self._extract_token_usage_from_response(judge_response)

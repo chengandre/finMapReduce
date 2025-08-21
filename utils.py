@@ -89,7 +89,7 @@ class LLMProviderFactory:
                 "elm": "ELM_OPENAI_API_KEY",
                 None: "OPENAI_API_KEY"
             }
-            env_var = key_mapping.get(config.api_key_env, "OPENAI_API_KEY")
+            env_var = key_mapping.get(config.api_key_env, "SELF_OPENAI_API_KEY")
             api_key = SecretStr(os.getenv(env_var, ""))
             base_url = config.base_url
 
@@ -310,6 +310,10 @@ class RetryStrategy:
         if isinstance(error, (asyncio.TimeoutError, TimeoutError)):
             return True
 
+        # Check for JSON parsing errors (these should be retryable)
+        if isinstance(error, ValueError) and "Invalid JSON response" in str(error):
+            return True
+
         error_str = str(error).lower()
         return any(err.lower() in error_str for err in self.retryable_errors)
 
@@ -406,15 +410,14 @@ class LLMClient:
             }
             log_file = self.prompt_logger.log_prompt(log_data)
 
-        # Execute with retries
-        response = self._execute_with_retry(prompt, kwargs, prompt_text)
+        # Execute with retries (including response processing)
+        processed_response = self._execute_with_retry(prompt, kwargs, prompt_text)
 
         # Clean up log on success
         if self.prompt_logger and log_file:
             self.prompt_logger.remove_log(log_file)
 
-        # Process and return response
-        return self.response_processor.process(response)
+        return processed_response
 
     def _format_prompt(self, prompt, kwargs: Dict[str, Any]) -> str:
         """Format prompt into text"""
@@ -435,20 +438,23 @@ class LLMClient:
         return str(prompt) + ' ' + ' '.join(str(v) for v in kwargs.values())
 
     def _execute_with_retry(self, prompt, kwargs: Dict[str, Any], prompt_text: str) -> Any:
-        """Execute the LLM call with retry logic"""
+        """Execute the LLM call with retry logic including response processing"""
         for attempt in range(self.retry_strategy.max_retries):
             try:
                 # Determine how to invoke based on prompt type
                 if isinstance(prompt, str):
                     # Direct string prompt
-                    return self.provider.invoke(prompt_text)
+                    raw_response = self.provider.invoke(prompt_text)
                 elif hasattr(prompt, 'format'):
                     # LangChain prompt template - format then invoke
                     formatted_prompt = prompt.format(**kwargs)
-                    return self.provider.invoke(formatted_prompt)
+                    raw_response = self.provider.invoke(formatted_prompt)
                 else:
                     # Fallback: try to use prompt directly
-                    return self.provider.invoke(str(prompt))
+                    raw_response = self.provider.invoke(str(prompt))
+
+                # Process response (this can raise JSON parsing errors)
+                return self.response_processor.process(raw_response)
 
             except Exception as e:
                 if not self.retry_strategy.should_retry(e, attempt + 1):
@@ -526,7 +532,7 @@ def create_json_llm(
 def create_rate_limited_llm(
     model_name: str = "gpt-4o-mini",
     temperature: float = 0.0,
-    max_tokens: int = 8000,
+    max_tokens: int = 8192,
     provider: str = "openai",
     api_key_env: Optional[str] = None,
     rate_limit_config: Optional[RateLimitConfig] = None,

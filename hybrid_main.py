@@ -20,9 +20,9 @@ def main():
                       help='Number of samples to process from the dataset')
     parser.add_argument('--temperature', type=float, default=0.00,
                       help='Temperature parameter for the LLM')
-    parser.add_argument('--chunk_size', type=int, default=36000,
+    parser.add_argument('--chunk_size', type=int, default=32768,
                       help='Size of each document chunk')
-    parser.add_argument('--chunk_overlap', type=int, default=1000,
+    parser.add_argument('--chunk_overlap', type=int, default=4096,
                       help='Overlap between chunks')
     parser.add_argument('--verbose', action='store_true',
                       help='Print detailed results for each QA pair')
@@ -32,7 +32,7 @@ def main():
                       help='Provider of the LLM')
     parser.add_argument('--max_concurrent_qa', type=int, default=150,
                       help='Maximum number of QA pairs to process concurrently')
-    parser.add_argument('--key', type=str, default="elm",
+    parser.add_argument('--key', type=str, default=None,
                       help='API key selector: "self" uses SELF_OPENAI_API_KEY, otherwise uses OPENAI_API_KEY')
     parser.add_argument('--prompt', type=str, default="hybrid",
                       help='Prompt set to use (hybrid for map_prompt_hybrid.yml and reduce_prompt_hybrid.yml)')

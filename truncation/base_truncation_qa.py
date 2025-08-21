@@ -67,10 +67,10 @@ class BaseTruncationQA(ABC):
     def load_full_document(self, qa_pair: Dict[str, Any]) -> Tuple[str, int]:
         """
         Load the full document content for a QA pair.
-        
+
         Args:
             qa_pair: Dictionary containing document information
-            
+
         Returns:
             Tuple of (document_text, token_count)
         """
@@ -80,11 +80,11 @@ class BaseTruncationQA(ABC):
     def invoke_llm_direct(self, document_text: str, question: str) -> Any:
         """
         Invoke LLM directly with truncated document and question.
-        
+
         Args:
             document_text: Truncated document content
             question: Question to answer
-            
+
         Returns:
             LLM response
         """
@@ -94,10 +94,10 @@ class BaseTruncationQA(ABC):
     def parse_result(self, llm_result: Any) -> Dict[str, Any]:
         """
         Parse the LLM result into standardized format.
-        
+
         Args:
             llm_result: Raw LLM response
-            
+
         Returns:
             Dictionary with llm_answer, llm_reasoning, llm_evidence
         """
@@ -124,7 +124,7 @@ class BaseTruncationQA(ABC):
     def get_evaluation_formatter_type(self) -> Optional[str]:
         """
         Get the evaluation formatter type for this pipeline.
-        
+
         Override in subclasses to specify a particular formatter.
         Returns None to use auto-detection.
         """
@@ -272,16 +272,16 @@ class BaseTruncationQA(ABC):
     def _truncate_document(self, doc_text: str, question: str) -> Tuple[str, Dict[str, Any]]:
         """
         Truncate document based on strategy and token limits.
-        
+
         Args:
             doc_text: Full document text
             question: Question being asked
-            
+
         Returns:
             Tuple of (truncated_text, truncation_statistics)
         """
         from truncation_utils import TruncationManager
-        
+
         # Calculate available tokens for document
         if self.max_document_tokens is not None:
             max_doc_tokens = self.max_document_tokens
@@ -296,7 +296,7 @@ class BaseTruncationQA(ABC):
             strategy=self.truncation_strategy,
             max_tokens=max_doc_tokens
         )
-        
+
         return manager.truncate_document(doc_text)
 
     def _extract_token_usage_from_response(self, response: Any) -> Dict[str, int]:
@@ -318,7 +318,7 @@ class BaseTruncationQA(ABC):
 
         return tokens
 
-    def _compile_token_stats(self, original_tokens: int, truncation_stats: Dict, 
+    def _compile_token_stats(self, original_tokens: int, truncation_stats: Dict,
                             llm_tokens: Dict, llm_time: float) -> Dict:
         """Compile token statistics and timing."""
         return {
@@ -483,7 +483,7 @@ class BaseTruncationQA(ABC):
     def _calculate_truncation_summary(self, qa_data: List[Dict[str, Any]]) -> Dict[str, Any]:
         """Calculate dataset-level truncation statistics."""
         import statistics
-        
+
         original_tokens = []
         truncated_tokens = []
         retention_rates = []
@@ -492,7 +492,7 @@ class BaseTruncationQA(ABC):
         for qa_pair in qa_data:
             token_stats = qa_pair.get('token_stats', {})
             original_tokens.append(token_stats.get('original_document_tokens', 0))
-            
+
             truncation_stats = token_stats.get('truncation_stats', {})
             if truncation_stats:
                 truncated_tokens.append(truncation_stats.get('truncated_tokens', 0))

@@ -19,7 +19,7 @@ from base_truncation_qa import BaseTruncationQA
 class FinQATruncation(BaseTruncationQA):
     """
     FinQA-specific implementation of truncation-based QA.
-    
+
     This implementation:
     - Loads data from FinQA JSON format
     - Processes markdown documents from specified directory
@@ -58,16 +58,16 @@ class FinQATruncation(BaseTruncationQA):
         try:
             with open(data_path, 'r', encoding='utf-8') as f:
                 data = json.load(f)
-            
+
             qa_data = []
             for item in data:
                 if num_samples and len(qa_data) >= num_samples:
                     break
                 qa_data.append(item)
-            
+
             print(f"Loaded {len(qa_data)} QA pairs from FinQA dataset")
             return qa_data
-            
+
         except FileNotFoundError:
             raise FileNotFoundError(f"FinQA data file not found: {data_path}")
         except Exception as e:
@@ -92,7 +92,7 @@ class FinQATruncation(BaseTruncationQA):
 
         # Construct full path to markdown document
         doc_path = os.path.join(self.doc_dir, f"{doc_name}.md")
-        
+
         try:
             # Load full document without chunking (use very large chunk size)
             documents, _ = load_document_chunk(
@@ -101,19 +101,19 @@ class FinQATruncation(BaseTruncationQA):
                 chunk_overlap=0,
                 method='markdown'
             )
-            
+
             if not documents:
                 raise ValueError(f"No document content loaded for {doc_path}")
-            
+
             # Combine all chunks into single text (should typically be just one chunk)
-            full_text = "\n\n".join([doc.page_content if hasattr(doc, 'page_content') else str(doc) 
+            full_text = "\n\n".join([doc.page_content if hasattr(doc, 'page_content') else str(doc)
                                    for doc in documents])
-            
+
             # Count tokens in full document
             token_count = num_tokens_from_string(full_text, "cl100k_base")
-            
+
             return full_text, token_count
-            
+
         except Exception as e:
             raise Exception(f"Failed to load document {doc_path}: {e}")
 
@@ -125,7 +125,7 @@ class FinQATruncation(BaseTruncationQA):
         """
         # Try different possible keys for document reference
         possible_keys = ['doc_name', 'document', 'doc_id', 'filename', 'file']
-        
+
         for key in possible_keys:
             if key in qa_pair and qa_pair[key]:
                 doc_name = qa_pair[key]
@@ -133,7 +133,7 @@ class FinQATruncation(BaseTruncationQA):
                 if doc_name.endswith('.md'):
                     doc_name = doc_name[:-3]
                 return doc_name
-        
+
         # If no direct key found, try to extract from other fields
         # This might need adjustment based on actual FinQA format
         if 'question_id' in qa_pair:
@@ -144,7 +144,7 @@ class FinQATruncation(BaseTruncationQA):
             parts = question_id.split('_')
             if len(parts) > 1:
                 return parts[0]  # Assume first part is document name
-        
+
         return None
 
     def invoke_llm_direct(self, document_text: str, question: str) -> Any:
@@ -181,8 +181,8 @@ class FinQATruncation(BaseTruncationQA):
             else:
                 # String template
                 if hasattr(self.llm, 'invoke'):
-                    response = self.llm.invoke(prompt_template, 
-                                            context=document_text, 
+                    response = self.llm.invoke(prompt_template,
+                                            context=document_text,
                                             question=question)
                 else:
                     # Fallback for basic LLM interface
@@ -191,7 +191,7 @@ class FinQATruncation(BaseTruncationQA):
                         question=question
                     )
                     response = self.llm.invoke_direct(formatted_prompt)
-            
+
             return response
 
         except Exception as e:
@@ -214,7 +214,7 @@ class FinQATruncation(BaseTruncationQA):
                 # This covers AIMessage, HumanMessage, etc. from LangChain
                 content = llm_result.content
                 return self._parse_text_response(content)
-            
+
             # Handle GPT wrapper response format
             elif isinstance(llm_result, dict):
                 # Check for JSON response first
@@ -236,11 +236,11 @@ class FinQATruncation(BaseTruncationQA):
                         "llm_reasoning": llm_result.get("reasoning", "Direct response"),
                         "llm_evidence": llm_result.get("evidence", [])
                     }
-            
+
             # Handle string response
             elif isinstance(llm_result, str):
                 return self._parse_text_response(llm_result)
-            
+
             # Handle other response types
             else:
                 content = str(llm_result)

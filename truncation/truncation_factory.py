@@ -77,15 +77,15 @@ class TruncationPipelineFactory:
 
         # Validate truncation configuration
         validation = validate_truncation_config(
-            truncation_strategy, 
-            context_window, 
+            truncation_strategy,
+            context_window,
             max_document_tokens
         )
-        
+
         if not validation["valid"]:
             errors = "; ".join(validation["errors"])
             raise ValueError(f"Invalid truncation configuration: {errors}")
-        
+
         # Print warnings if any
         for warning in validation["warnings"]:
             print(f"Warning: {warning}")
@@ -212,9 +212,9 @@ class TruncationPipelineFactory:
         return info
 
     @classmethod
-    def get_recommended_config(cls, 
-                              dataset: str, 
-                              model_name: str, 
+    def get_recommended_config(cls,
+                              dataset: str,
+                              model_name: str,
                               document_complexity: str = "medium") -> Dict[str, Any]:
         """
         Get recommended configuration for a dataset and model combination.
@@ -234,7 +234,7 @@ class TruncationPipelineFactory:
         """
         # Infer context window from model name
         context_window = cls._infer_context_window(model_name)
-        
+
         # Base configuration
         config = {
             "context_window": context_window,
@@ -274,7 +274,7 @@ class TruncationPipelineFactory:
             Estimated context window size
         """
         model_name_lower = model_name.lower()
-        
+
         # GPT models
         if "gpt-4o" in model_name_lower:
             return 128000
@@ -288,7 +288,7 @@ class TruncationPipelineFactory:
                 return 16384
             else:
                 return 4096
-        
+
         # Claude models
         elif "claude-3" in model_name_lower or "claude-sonnet" in model_name_lower:
             return 200000
@@ -296,29 +296,29 @@ class TruncationPipelineFactory:
             return 100000
         elif "claude" in model_name_lower:
             return 100000
-        
+
         # DeepSeek models
         elif "deepseek" in model_name_lower:
             if "r1" in model_name_lower:
                 return 128000
             else:
                 return 64000
-        
+
         # Gemini models
         elif "gemini" in model_name_lower:
             if "pro" in model_name_lower:
                 return 1000000  # Very large context
             else:
                 return 32768
-        
+
         # Default fallback
         else:
             print(f"Warning: Unknown model '{model_name}', using default context window of 32K")
             return 32768
 
     @classmethod
-    def validate_configuration(cls, 
-                              dataset: str, 
+    def validate_configuration(cls,
+                              dataset: str,
                               truncation_strategy: str,
                               context_window: int,
                               **config) -> Dict[str, Union[bool, List[str]]]:

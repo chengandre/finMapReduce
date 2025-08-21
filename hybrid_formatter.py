@@ -16,7 +16,7 @@ class HybridFormatter(OutputFormatter):
     def __init__(self,
                  prompts_dict: Dict[str, Any],
                  question_improvement_llm: Optional[Any] = None,
-                 score_threshold: int = 50):
+                 score_threshold: int = 5):
         """
         Initialize hybrid formatter.
 
@@ -65,8 +65,11 @@ class HybridFormatter(OutputFormatter):
         Returns:
             Dictionary with 'json' and 'raw_response' keys
         """
-        reduce_prompt = self.prompts_dict['reduce_prompt']
-        return self.reduce_llm.invoke(reduce_prompt, context=formatted_results, question=question)
+        reduce_prompt = self.prompts_dict['reduce_prompt'].format(
+            context=formatted_results,
+            question=question
+        )
+        return self.reduce_llm.invoke(reduce_prompt)
 
     def preprocess_map_results(self, results: List[Dict[str, Any]]) -> List[str]:
         """
@@ -193,11 +196,11 @@ class HybridFormatter(OutputFormatter):
             return original_question, empty_tokens
 
         try:
-            prompt = self.prompts_dict['question_improvement_prompt']
+            prompt = self.prompts_dict['question_improvement_prompt'].format(question=original_question)
             if self.question_improvement_llm:
-                response = self.question_improvement_llm.invoke(prompt, question=original_question)
+                response = self.question_improvement_llm.invoke(prompt)
             else:
-                response = self.reduce_llm.invoke(prompt, question=original_question)
+                response = self.reduce_llm.invoke(prompt)
 
             tokens = self._extract_token_usage_from_response(response)
 
