@@ -23,8 +23,8 @@ class BaseMapReduceQA(ABC):
                  prompts_dict: Dict[str, Any],
                  chunk_size: int = 36000,
                  chunk_overlap: int = 1000,
-                 max_concurrent_qa: int = 150,
-                 max_concurrent_chunks: int = 150,
+                 pdf_parser: str = 'marker',
+                 max_total_requests: int = 300,
                  map_llm: Optional[Any] = None,
                  reduce_llm: Optional[Any] = None,
                  judge_llm: Optional[Any] = None):
@@ -36,8 +36,7 @@ class BaseMapReduceQA(ABC):
             prompts_dict: Dictionary containing prompt templates
             chunk_size: Size of document chunks for processing
             chunk_overlap: Overlap between consecutive chunks
-            max_concurrent_qa: Maximum concurrent QA pairs to process
-            max_concurrent_chunks: Maximum concurrent chunks in map phase
+            max_total_requests: Maximum total concurrent requests across entire pipeline
             map_llm: Optional separate LLM for map phase (defaults to llm)
             reduce_llm: Optional separate LLM for reduce phase (defaults to llm)
             judge_llm: Optional separate LLM for evaluation (defaults to llm)
@@ -49,8 +48,9 @@ class BaseMapReduceQA(ABC):
         self.prompts_dict = prompts_dict
         self.chunk_size = chunk_size
         self.chunk_overlap = chunk_overlap
-        self.max_concurrent_qa = max_concurrent_qa
-        self.max_concurrent_chunks = max_concurrent_chunks
+        self.pdf_parser = pdf_parser
+        self.max_total_requests = max_total_requests
+        self.global_semaphore = asyncio.Semaphore(max_total_requests)
 
     # ===== Abstract Methods - Must be implemented by subclasses =====
 
@@ -342,10 +342,10 @@ class BaseMapReduceQA(ABC):
             qa_data, question_improvement_tokens = self._preprocess_questions_parallel(qa_data)
 
         t1 = time.time()
-        print(f"Processing {len(qa_data)} QA pairs with {self.max_concurrent_qa} concurrent workers...")
+        print(f"Processing {len(qa_data)} QA pairs with max {self.max_total_requests} total concurrent requests...")
 
         # Process QA pairs in parallel
-        with concurrent.futures.ThreadPoolExecutor(max_workers=min(len(qa_data),self.max_concurrent_qa)) as executor:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=min(len(qa_data), 10)) as executor:
             future_to_qa = {
                 executor.submit(self.process_single_qa, qa_pair, document_cache): i
                 for i, qa_pair in enumerate(qa_data)
@@ -408,7 +408,6 @@ class BaseMapReduceQA(ABC):
         print(f"Loading {len(unique_docs)} unique documents in parallel...")
 
         # Load documents in parallel using ThreadPool
-        loop = asyncio.get_running_loop()
         document_cache = {}
 
         def load_single_document(doc_item):
@@ -463,80 +462,48 @@ class BaseMapReduceQA(ABC):
 
     async def invoke_llm_map_async(self, chunk: Any, question: str) -> Dict[str, Any]:
         """
-        Async version of invoke_llm_map.
-        Default implementation uses executor for backward compatibility.
-        Subclasses can override for true async.
+        Async version of invoke_llm_map with global semaphore.
+        Subclasses should override for specific LLM handling.
         """
-        # For AsyncLLMClient, subclass should override this method
-        # to use it properly with specific prompt handling
-
-        # Fallback to sync version in thread
-        loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(
-            None,
-            self.invoke_llm_map,
-            chunk,
-            question
-        )
+        async with self.global_semaphore:
+            return await self.map_llm.invoke(
+                self.prompts_dict['map_prompt'].format(context=chunk.page_content, question=question)
+            )
 
     async def invoke_llm_reduce_async(self, formatted_results: Any, question: str) -> Any:
         """
-        Async version of invoke_llm_reduce.
-        Default implementation uses executor for backward compatibility.
+        Async version of invoke_llm_reduce with global semaphore.
+        Subclasses should override for specific LLM handling.
         """
-        # For AsyncLLMClient, subclass should override this method
-        # to use it properly with specific prompt handling
+        async with self.global_semaphore:
+            return await self.reduce_llm.invoke(
+                self.prompts_dict['reduce_prompt'].format(context=formatted_results, question=question)
+            )
 
-        # Fallback to sync version in thread
-        loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(
-            None,
-            self.invoke_llm_reduce,
-            formatted_results,
-            question
-        )
+    async def invoke_llm_judge_async(self, judge_prompt: str) -> Any:
+        """
+        Async version of invoke_llm_judge with global semaphore.
+        """
+        async with self.global_semaphore:
+            return await self.judge_llm.invoke(judge_prompt)
 
     async def _map_phase_async(self, docs: List[Any], question: str) -> Tuple[List[Dict], Dict[str, int], float]:
-        """Async version of map phase with proper concurrency control"""
-        loop = asyncio.get_running_loop()
-        map_start_time = loop.time()
+        """Simplified async map phase without per-chunk semaphore"""
+        start = asyncio.get_running_loop().time()
 
-        # Process chunks without semaphore (rate limiting handled in async_llm_client.py)
-        async def process_chunk(chunk, index):
+        async def process_chunk(chunk, idx):
             try:
                 result = await self.invoke_llm_map_async(chunk, question)
-                return index, result
+                return idx, result
             except Exception as e:
-                error_msg = str(e) if str(e).strip() else f"Unknown error: {type(e).__name__}"
-                print(f"Error in map phase for chunk {index}: {error_msg}")
-                return index, {"error": error_msg, "content": ""}
+                return idx, {"error": str(e), "content": ""}
 
-        # Create tasks
-        tasks = [
-            asyncio.create_task(process_chunk(chunk, i))
-            for i, chunk in enumerate(docs)
-        ]
+        results = await asyncio.gather(
+            *(process_chunk(c, i) for i, c in enumerate(docs))
+        )
 
-        # Gather results maintaining order
-        results_with_index = await asyncio.gather(*tasks, return_exceptions=True)
-
-        # Sort by index and extract results
-        results = []
-        for item in sorted(results_with_index, key=lambda x: x[0] if isinstance(x, tuple) else -1):
-            if isinstance(item, tuple):
-                _, result = item
-                results.append(result)
-            elif isinstance(item, Exception):
-                results.append({"error": str(item), "content": ""})
-            else:
-                results.append({"error": "Unknown error", "content": ""})
-
-        map_time = loop.time() - map_start_time
-
-        # Calculate tokens (reuse existing method)
-        tokens = self._calculate_map_tokens(results)
-
-        return results, tokens, map_time
+        results_sorted = [r for _, r in sorted(results, key=lambda x: x[0])]
+        return results_sorted, self._calculate_map_tokens(results_sorted), asyncio.get_running_loop().time() - start
 
     async def _reduce_phase_async(self, map_results: List[Any], question: str) -> Tuple[Any, Dict[str, int], float]:
         """Async version of reduce phase"""
@@ -573,12 +540,12 @@ class BaseMapReduceQA(ABC):
             if document_cache is not None:
                 doc_identifier = self.get_document_identifier(qa_pair)
                 if doc_identifier in document_cache:
-                    docs, token_count = document_cache[doc_identifier]
+                    docs, _ = document_cache[doc_identifier]
                 else:
                     return self._handle_document_error(qa_pair, f"Document {doc_identifier} not found in cache")
             else:
                 # Fallback to loading individually
-                docs, token_count = self.load_document_chunks(qa_pair)
+                docs, _ = self.load_document_chunks(qa_pair)
         except Exception as e:
             print(f"Error loading document for {self.get_document_identifier(qa_pair)}: {e}")
             return self._handle_document_error(qa_pair, str(e))
@@ -650,67 +617,30 @@ class BaseMapReduceQA(ABC):
         t1 = loop.time()
         print(f"Processing {len(qa_data)} QA pairs")
 
-        # Process QA pairs without semaphore (rate limiting handled in async_llm_client.py)
-        async def process_qa_pair(qa_pair, idx):
-            try:
-                return await self.process_single_qa_async(qa_pair, document_cache), idx
-            except Exception as e:
-                print(f"Error processing QA pair {idx+1}: {e}")
-                qa_pair["llm_answer"] = "Error during processing"
-                qa_pair["error"] = str(e)
-                qa_pair["token_stats"] = self._empty_token_stats()
-                return qa_pair, idx
-
-        # Create tasks
         tasks = [
-            asyncio.create_task(process_qa_pair(qa_pair, i))
-            for i, qa_pair in enumerate(qa_data)
+            asyncio.create_task(self.process_single_qa_async(qa, document_cache))
+            for qa in qa_data
         ]
 
-        # Process with progress bar using as_completed
-        try:
-            from tqdm.asyncio import tqdm as atqdm
-            use_async_tqdm = True
-        except ImportError:
-            print("tqdm.asyncio not available, using regular progress tracking")
-            use_async_tqdm = False
-            atqdm = None
-
         results = []
-        if use_async_tqdm and atqdm:
-            for task in atqdm.as_completed(tasks, total=len(tasks), desc="Processing QA pairs"):
-                updated_qa_pair, idx = await task
-                qa_data[idx] = updated_qa_pair
-                results.append((updated_qa_pair, idx))
-        else:
-            # Fallback manual progress tracking
-            from tqdm import tqdm
-            pbar = tqdm(total=len(tasks), desc="Processing QA pairs")
-            for task in asyncio.as_completed(tasks):
-                updated_qa_pair, idx = await task
-                qa_data[idx] = updated_qa_pair
-                results.append((updated_qa_pair, idx))
-                pbar.update(1)
-            pbar.close()
+        from tqdm import tqdm
+        pbar = tqdm(total=len(tasks), desc="Processing QA pairs")
+        for task in asyncio.as_completed(tasks):
+            result = await task
+            results.append(result)
+            pbar.update(1)
+        pbar.close()
+
+        # Update qa_data with results
+        qa_data[:] = results
 
         process_time = loop.time() - t1
         print(f"QA processing completed in {process_time:.1f} seconds ({process_time/len(qa_data):.1f}s per question)")
 
-        # Evaluate with judge (keep sync for now, or make async if judge supports it)
+        # Evaluate with judge using async method
         print("Evaluating answers using LLM judge...")
         judge = judge_llm if judge_llm is not None else self.judge_llm
-
-        # Check if judge is AsyncLLMClient (has async invoke method)
-        if hasattr(judge, 'invoke') and asyncio.iscoroutinefunction(judge.invoke):
-            evaluation_results = await self._evaluate_with_judge_async(judge, qa_data)
-        else:
-            # Run sync evaluation in executor
-            evaluation_results = await loop.run_in_executor(
-                None,
-                self._evaluate_with_judge,
-                judge,
-                qa_data
-            )
+        evaluation_results = await self._evaluate_with_judge_async(judge, qa_data)
 
         # Get judge model name
         judge_model_name = judge.get_model_name() if hasattr(judge, 'get_model_name') else model_name
@@ -797,6 +727,26 @@ class BaseMapReduceQA(ABC):
         tokens = self._calculate_reduce_tokens(result_final)
 
         return result_final, tokens, reduce_time
+
+    def _evaluate_with_judge(self, judge_llm: Any, qa_data: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """
+        Evaluate results using LLM judge with automatic formatter detection.
+
+        Subclasses can override get_evaluation_formatter_type() to specify
+        a particular formatter.
+        """
+        from evaluation import evaluate_with_llm_judge
+
+        # Get formatter type from subclass if specified
+        formatter_type = self.get_evaluation_formatter_type()
+
+        return evaluate_with_llm_judge(
+            judge_llm,
+            qa_data,
+            self.prompts_dict,
+            judge_prompt_key=self.get_judge_prompt_key(),
+            formatter_type=formatter_type
+        )
 
     def _calculate_map_tokens(self, results: List[Dict]) -> Dict[str, int]:
         """Calculate token usage from map phase results."""
@@ -914,26 +864,6 @@ class BaseMapReduceQA(ABC):
         if len(doc_names) > 10:
             print(f"... and {len(doc_names) - 10} more documents")
         print("===============================\n")
-
-    def _evaluate_with_judge(self, judge_llm: Any, qa_data: List[Dict[str, Any]]) -> Dict[str, Any]:
-        """
-        Evaluate results using LLM judge with automatic formatter detection.
-
-        Subclasses can override get_evaluation_formatter_type() to specify
-        a particular formatter.
-        """
-        from evaluation import evaluate_with_llm_judge
-
-        # Get formatter type from subclass if specified
-        formatter_type = self.get_evaluation_formatter_type()
-
-        return evaluate_with_llm_judge(
-            judge_llm,
-            qa_data,
-            self.prompts_dict,
-            judge_prompt_key=self.get_judge_prompt_key(),
-            formatter_type=formatter_type
-        )
 
     def _extract_score_analysis(self, map_results: List[Dict[str, Any]]) -> Dict[str, Any]:
         """Extract score distribution from map results if available."""
@@ -1127,7 +1057,7 @@ class BaseMapReduceQA(ABC):
                 "prompt_set": self.prompts_dict.get('prompt_set_name', 'unknown'),
                 "chunk_size": self.chunk_size,
                 "chunk_overlap": self.chunk_overlap,
-                "max_concurrent_qa": self.max_concurrent_qa,
+                "max_total_requests": self.max_total_requests,
                 "approach": "MapReduce",
                 "llm_configuration": llm_config
             },
@@ -1236,7 +1166,7 @@ class BaseMapReduceQA(ABC):
         total_tokens = {"input_tokens": 0, "output_tokens": 0, "cache_read_tokens": 0}
 
         # Process in parallel
-        with concurrent.futures.ThreadPoolExecutor(max_workers=self.max_concurrent_qa) as executor:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=min(10, len(qa_data))) as executor:
             future_to_index = {
                 executor.submit(improve_single_question, qa_pair): i
                 for i, qa_pair in enumerate(qa_data)

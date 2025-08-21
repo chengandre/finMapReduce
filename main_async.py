@@ -1,10 +1,8 @@
 import asyncio
 import argparse
 
-from utils import RateLimitConfig, load_prompt_set, create_rate_limited_llm
-from async_llm_client import (
-    create_async_rate_limited_llm
-)
+from utils import RateLimitConfig, load_prompt_set
+from async_llm_client import create_async_rate_limited_llm
 from factory import MapReducePipelineFactory
 
 
@@ -26,7 +24,7 @@ async def main_async():
                        help='Directory containing FinQA document markdown files (for FinQA only)')
 
     # Model configuration
-    parser.add_argument('--model-name', type=str, default='gpt-4o-mini',
+    parser.add_argument('--model_name', type=str, default='gpt-4o-mini',
                        help='Model name to use')
     parser.add_argument('--temperature', type=float, default=0.0,
                        help='Temperature setting')
@@ -35,7 +33,7 @@ async def main_async():
     parser.add_argument('--provider', type=str, default='openai',
                        choices=['openai', 'openrouter'],
                        help='LLM provider')
-    parser.add_argument('--key', type=str, default='elm',
+    parser.add_argument('--key', type=str, default='self',
                        help='API key selector (self, elm, or None for default)')
 
     # Processing settings
@@ -45,7 +43,7 @@ async def main_async():
                        help='Chunk overlap size')
     parser.add_argument('--prompt', type=str, default=None,
                        help='Prompt set to use (auto-detected from format_type if not provided)')
-    parser.add_argument('--score_threshold', type=int, default=50,
+    parser.add_argument('--score_threshold', type=int, default=5,
                        help='Score threshold for filtering (plain_text and hybrid formats)')
     parser.add_argument('--pdf_parser', type=str, default='marker',
                        help='PDF parsing method to use (default: marker)')
@@ -57,12 +55,9 @@ async def main_async():
                        help='Tokens per minute rate limit')
     parser.add_argument('--request_burst_size', type=int, default=3000,
                        help='Maximum burst size for requests')
+    parser.add_argument('--max_total_requests', type=int, default=1000,
+                       help='Maximum total concurrent requests across entire pipeline')
 
-    # Mode selection
-    parser.add_argument('--use-async', default=True, action='store_true',
-                       help='Use async processing (default: sync)')
-    parser.add_argument('--enable-logging', action='store_true',
-                       help='Enable prompt logging')
     parser.add_argument('--verbose', action='store_true',
                        help='Print detailed results for each QA pair')
     parser.add_argument('--comment', type=str, default=None,
@@ -95,6 +90,7 @@ async def main_async():
     print(f"Format type: {args.format_type}")
     print(f"Model: {args.model_name} (Provider: {args.provider})")
     print(f"Prompt set: {prompt_set}")
+    print(f"API key: {args.key}")
 
     # Load prompts
     try:
@@ -111,197 +107,57 @@ async def main_async():
         request_burst_size=args.request_burst_size
     )
     judge_rate_config = rate_config
+
     # Configure LLMs based on dataset and format_type
     map_llm = None
     reduce_llm = None
     judge_llm = None
     llm_client = None
 
-    if args.dataset == 'financebench':
-        if args.format_type == 'hybrid':
-            # Hybrid: separate map (text) and reduce (JSON) LLMs
-            if args.use_async:
-                map_llm = create_async_rate_limited_llm(
-                    model_name=args.model_name,
-                    temperature=args.temperature,
-                    max_tokens=args.max_tokens,
-                    provider=args.provider,
-                    api_key_env=args.key,
-                    rate_limit_config=rate_config,
-                    parse_json=False,
-                    enable_logging=args.enable_logging
-                )
-                reduce_llm = create_async_rate_limited_llm(
-                    model_name=args.model_name,
-                    temperature=args.temperature,
-                    max_tokens=args.max_tokens,
-                    provider=args.provider,
-                    api_key_env=args.key,
-                    rate_limit_config=rate_config,
-                    parse_json=True,
-                    enable_logging=args.enable_logging
-                )
-            else:
-                map_llm = create_rate_limited_llm(
-                    model_name=args.model_name,
-                    temperature=args.temperature,
-                    max_tokens=args.max_tokens,
-                    provider=args.provider,
-                    api_key_env=args.key,
-                    rate_limit_config=rate_config,
-                    parse_json=False
-                )
-                reduce_llm = create_rate_limited_llm(
-                    model_name=args.model_name,
-                    temperature=args.temperature,
-                    max_tokens=args.max_tokens,
-                    provider=args.provider,
-                    api_key_env=args.key,
-                    rate_limit_config=rate_config,
-                    parse_json=True
-                )
+    if args.format_type == 'hybrid':
+        # Hybrid: separate map (text) and reduce (JSON) LLMs
+        map_llm = create_async_rate_limited_llm(
+            model_name=args.model_name,
+            temperature=args.temperature,
+            max_tokens=args.max_tokens,
+            provider=args.provider,
+            api_key_env=args.key,
+            rate_limit_config=rate_config,
+            parse_json=False
+        )
+        reduce_llm = create_async_rate_limited_llm(
+            model_name=args.model_name,
+            temperature=args.temperature,
+            max_tokens=args.max_tokens,
+            provider=args.provider,
+            api_key_env=args.key,
+            rate_limit_config=rate_config,
+            parse_json=True
+        )
+        llm_client = reduce_llm  # Primary LLM for base class
 
-            # Judge LLM for hybrid: gpt-5-nano
-            if args.use_async:
-                judge_llm = create_async_rate_limited_llm(
-                    model_name="gpt-5-nano",
-                    temperature=1.0,
-                    max_tokens=8192,
-                    provider="openai",
-                    api_key_env=args.key,
-                    rate_limit_config=judge_rate_config,
-                    parse_json=True,
-                    enable_logging=args.enable_logging
-                )
-            else:
-                judge_llm = create_rate_limited_llm(
-                    model_name="gpt-5-nano",
-                    temperature=1.0,
-                    max_tokens=8192,
-                    provider="openai",
-                    api_key_env=args.key,
-                    rate_limit_config=judge_rate_config,
-                    parse_json=True
-                )
-            llm_client = reduce_llm  # Primary LLM for base class
+    else:
+        # Standard FinanceBench (json): JSON parsing
+        llm_client = create_async_rate_limited_llm(
+            model_name=args.model_name,
+            temperature=args.temperature,
+            max_tokens=args.max_tokens,
+            provider=args.provider,
+            api_key_env=args.key,
+            rate_limit_config=rate_config,
+            parse_json=args.format_type == 'json'
+        )
 
-        elif args.format_type == 'plain_text':
-            # Last year: text output, no JSON parsing
-            if args.use_async:
-                llm_client = create_async_rate_limited_llm(
-                    model_name=args.model_name,
-                    temperature=args.temperature,
-                    max_tokens=args.max_tokens,
-                    provider="openai",
-                    api_key_env=args.key,
-                    rate_limit_config=rate_config,
-                    parse_json=False,
-                    enable_logging=args.enable_logging
-                )
-            else:
-                llm_client = create_rate_limited_llm(
-                    model_name=args.model_name,
-                    temperature=args.temperature,
-                    max_tokens=args.max_tokens,
-                    provider="openai",
-                    api_key_env=args.key,
-                    rate_limit_config=rate_config,
-                    parse_json=False
-                )
-
-            # Judge LLM for last_year: gpt-5-nano
-            if args.use_async:
-                judge_llm = create_async_rate_limited_llm(
-                    model_name="gpt-5-nano",
-                    temperature=1.0,
-                    max_tokens=args.max_tokens,
-                    provider="openai",
-                    api_key_env=args.key,
-                    rate_limit_config=judge_rate_config,
-                    parse_json=True,
-                    enable_logging=args.enable_logging
-                )
-            else:
-                judge_llm = create_rate_limited_llm(
-                    model_name="gpt-5-nano",
-                    temperature=1.0,
-                    max_tokens=args.max_tokens,
-                    provider="openai",
-                    api_key_env=args.key,
-                    rate_limit_config=judge_rate_config,
-                    parse_json=True
-                )
-        else:
-            # Standard FinanceBench (json, plain_text): JSON parsing
-            if args.use_async:
-                llm_client = create_async_rate_limited_llm(
-                    model_name=args.model_name,
-                    temperature=args.temperature,
-                    max_tokens=args.max_tokens,
-                    provider=args.provider,
-                    api_key_env=args.key,
-                    rate_limit_config=rate_config,
-                    parse_json=True,
-                    enable_logging=args.enable_logging
-                )
-            else:
-                llm_client = create_rate_limited_llm(
-                    model_name=args.model_name,
-                    temperature=args.temperature,
-                    max_tokens=args.max_tokens,
-                    provider=args.provider,
-                    api_key_env=args.key,
-                    rate_limit_config=rate_config,
-                    parse_json=True
-                )
-
-            # Judge LLM for standard FinanceBench: deepseek
-            if args.use_async:
-                judge_llm = create_async_rate_limited_llm(
-                    model_name="deepseek/deepseek-r1-0528:free",
-                    temperature=0.0,
-                    max_tokens=8192,
-                    provider="openrouter",
-                    api_key_env=None,
-                    rate_limit_config=judge_rate_config,
-                    parse_json=True,
-                    enable_logging=args.enable_logging
-                )
-            else:
-                judge_llm = create_rate_limited_llm(
-                    model_name="deepseek/deepseek-r1-0528:free",
-                    temperature=0.0,
-                    max_tokens=8192,
-                    provider="openrouter",
-                    rate_limit_config=judge_rate_config,
-                    parse_json=True
-                )
-
-    elif args.dataset == 'finqa':
-        # FinQA: JSON parsing, reuse same LLM for judge
-        if args.use_async:
-            llm_client = create_async_rate_limited_llm(
-                model_name=args.model_name,
-                temperature=args.temperature,
-                max_tokens=args.max_tokens,
-                provider=args.provider,
-                api_key_env=args.key,
-                rate_limit_config=rate_config,
-                parse_json=True,
-                enable_logging=args.enable_logging
-            )
-        else:
-            from utils import create_rate_limited_llm
-            llm_client = create_rate_limited_llm(
-                model_name=args.model_name,
-                temperature=args.temperature,
-                max_tokens=args.max_tokens,
-                provider=args.provider,
-                api_key_env=args.key,
-                rate_limit_config=rate_config,
-                parse_json=True
-            )
-        judge_llm = llm_client  # Reuse same LLM for judge
+    # Judge LLM for hybrid: gpt-5-nano
+    judge_llm = create_async_rate_limited_llm(
+        model_name="gpt-5-nano",
+        temperature=1.0,
+        max_tokens=8192,
+        provider="openai",
+        api_key_env=args.key,
+        rate_limit_config=judge_rate_config,
+        parse_json=True
+    )
 
     print(f"Created LLM configuration for {args.dataset} + {args.format_type}")
     if map_llm and reduce_llm:
@@ -327,7 +183,8 @@ async def main_async():
             'chunk_size': args.chunk_size,
             'chunk_overlap': args.chunk_overlap,
             'pdf_parser': args.pdf_parser,
-            'score_threshold': args.score_threshold
+            'score_threshold': args.score_threshold,
+            'max_total_requests': args.max_total_requests
         }
 
         # Add dataset-specific arguments
@@ -347,37 +204,16 @@ async def main_async():
         traceback.print_exc()
         return
 
-    # Run processing
+    # Run async processing
     try:
-        if args.use_async:
-            # Check if pipeline supports async processing
-            if hasattr(pipeline, 'process_dataset_async'):
-                print("Running async processing...")
-                results = await pipeline.process_dataset_async(
-                    data_path=data_path,
-                    model_name=args.model_name,
-                    num_samples=args.num_samples,
-                    judge_llm=judge_llm,
-                    comment=args.comment
-                )
-            else:
-                print("Pipeline does not support async processing, falling back to sync...")
-                results = pipeline.process_dataset(
-                    data_path=data_path,
-                    model_name=args.model_name,
-                    num_samples=args.num_samples,
-                    judge_llm=judge_llm,
-                    comment=args.comment
-                )
-        else:
-            print("Running sync processing...")
-            results = pipeline.process_dataset(
-                data_path=data_path,
-                model_name=args.model_name,
-                num_samples=args.num_samples,
-                judge_llm=judge_llm,
-                comment=args.comment
-            )
+        print("Running async processing...")
+        results = await pipeline.process_dataset_async(
+            data_path=data_path,
+            model_name=args.model_name,
+            num_samples=args.num_samples,
+            judge_llm=judge_llm,
+            comment=args.comment
+        )
 
         print(f"\nProcessing complete!")
         print(f"Samples processed: {results['num_samples']}")
@@ -403,12 +239,7 @@ async def main_async():
         # Print rate limiting stats if available
         if llm_client and hasattr(llm_client, 'get_stats'):
             try:
-                # Try async first, then sync
-                if hasattr(llm_client.get_stats, '__call__') and asyncio.iscoroutinefunction(llm_client.get_stats):
-                    stats = await llm_client.get_stats()
-                else:
-                    stats = llm_client.get_stats()
-                
+                stats = await llm_client.get_stats()
                 if stats:
                     print(f"\nRate limiting stats:")
                     print(f"  Total requests: {stats['total_requests']}")
@@ -427,13 +258,8 @@ async def main_async():
 
 
 def main():
-    """Entry point that handles both sync and async modes"""
-    import sys
-
-    if '--use-async' in sys.argv:
-        return asyncio.run(main_async())
-    else:
-        return asyncio.run(main_async())  # Run everything through async for simplicity
+    """Entry point for async processing"""
+    return asyncio.run(main_async())
 
 
 if __name__ == "__main__":

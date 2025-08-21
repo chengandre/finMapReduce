@@ -175,34 +175,23 @@ class PlainTextFormatter(OutputFormatter):
         Returns:
             Dictionary with 'content' and 'usage' keys
         """
-        # Check if the LLM client supports async
-        if hasattr(self.map_llm, 'ainvoke') or hasattr(self.map_llm, 'invoke') and asyncio.iscoroutinefunction(self.map_llm.invoke):
-            prompt = self.prompts_dict['map_prompt'].format(
-                context=chunk.page_content,
-                question_int=question
-            )
+        prompt = self.prompts_dict['map_prompt'].format(
+            context=chunk.page_content,
+            question_int=question
+        )
 
-            response = await self.map_llm.invoke(prompt)
+        response = await self.map_llm.invoke(prompt)
 
-            if hasattr(response, 'usage_metadata') and response.usage_metadata:
-                return {
-                    'content': response.content,
-                    'usage': response.usage_metadata
-                }
-            else:
-                return {
-                    'content': response.content if hasattr(response, 'content') else str(response),
-                    'usage': {}
-                }
+        if hasattr(response, 'usage_metadata') and response.usage_metadata:
+            return {
+                'content': response.content,
+                'usage': response.usage_metadata
+            }
         else:
-            # Fallback to sync version in executor
-            loop = asyncio.get_running_loop()
-            return await loop.run_in_executor(
-                None,
-                self.invoke_llm_map,
-                chunk,
-                question
-            )
+            return {
+                'content': response.content if hasattr(response, 'content') else str(response),
+                'usage': {}
+            }
 
     async def invoke_llm_reduce_async(self, formatted_results: Any, question: str) -> Any:
         """
@@ -215,20 +204,9 @@ class PlainTextFormatter(OutputFormatter):
         Returns:
             Response object from LLM
         """
-        # Check if the LLM client supports async
-        if hasattr(self.reduce_llm, 'ainvoke') or hasattr(self.reduce_llm, 'invoke') and asyncio.iscoroutinefunction(self.reduce_llm.invoke):
-            prompt = self.prompts_dict['reduce_prompt'].format(
-                summaries=formatted_results,
-                question_final=question
-            )
+        prompt = self.prompts_dict['reduce_prompt'].format(
+            summaries=formatted_results,
+            question_final=question
+        )
 
-            return await self.reduce_llm.invoke(prompt)
-        else:
-            # Fallback to sync version in executor
-            loop = asyncio.get_running_loop()
-            return await loop.run_in_executor(
-                None,
-                self.invoke_llm_reduce,
-                formatted_results,
-                question
-            )
+        return await self.reduce_llm.invoke(prompt)

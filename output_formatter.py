@@ -173,12 +173,10 @@ class OutputFormatter(ABC):
         return config
 
     # Async methods with default implementations
+    @abstractmethod
     async def invoke_llm_map_async(self, chunk: Any, question: str) -> Dict[str, Any]:
         """
         Async version of invoke_llm_map.
-
-        Default implementation falls back to sync version in executor.
-        Override in subclasses for better async performance.
 
         Args:
             chunk: Document chunk with page_content attribute
@@ -187,20 +185,12 @@ class OutputFormatter(ABC):
         Returns:
             Dictionary with format-specific response structure
         """
-        loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(
-            None,
-            self.invoke_llm_map,
-            chunk,
-            question
-        )
+        pass
 
+    @abstractmethod
     async def invoke_llm_reduce_async(self, formatted_results: Any, question: str) -> Any:
         """
         Async version of invoke_llm_reduce.
-
-        Default implementation falls back to sync version in executor.
-        Override in subclasses for better async performance.
 
         Args:
             formatted_results: Formatted map results
@@ -209,10 +199,4 @@ class OutputFormatter(ABC):
         Returns:
             Format-specific response object
         """
-        loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(
-            None,
-            self.invoke_llm_reduce,
-            formatted_results,
-            question
-        )
+        pass

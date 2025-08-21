@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from utils import (
     LLMConfig, LLMProviderFactory, TokenEstimator,
     ResponseProcessor, RawResponseProcessor, JSONResponseProcessor,
-    RetryStrategy, PromptLogger
+    RetryStrategy
 )
 
 
@@ -117,7 +117,6 @@ class AsyncLLMClient:
         rate_limiter: Optional[AsyncDualRateLimiter] = None,
         response_processor: Optional[ResponseProcessor] = None,
         retry_strategy: Optional[RetryStrategy] = None,
-        prompt_logger: Optional[PromptLogger] = None,
         token_estimator: Optional[TokenEstimator] = None,
         request_timeout: float = 600.0
     ):
@@ -126,7 +125,6 @@ class AsyncLLMClient:
         self.rate_limiter = rate_limiter
         self.response_processor = response_processor or RawResponseProcessor()
         self.retry_strategy = retry_strategy or RetryStrategy()
-        self.prompt_logger = prompt_logger
         self.token_estimator = token_estimator or TokenEstimator()
         self.request_timeout = request_timeout
 
@@ -145,28 +143,8 @@ class AsyncLLMClient:
             )
             await self.rate_limiter.wait_for_permission(tokens_needed)
 
-        # Log prompt if configured
-        log_file = None
-        if self.prompt_logger:
-            log_data = {
-                'prompt': prompt_text,
-                'kwargs': kwargs,
-                'model': self.config.model_name
-            }
-            # Run log creation in executor to avoid blocking
-            loop = asyncio.get_running_loop()
-            log_file = await loop.run_in_executor(
-                None, self.prompt_logger.log_prompt, log_data
-            )
-
         # Execute with retries
         response = await self._execute_with_retry(prompt, kwargs, prompt_text)
-
-        # Clean up log on success
-        if self.prompt_logger and log_file:
-            # Run cleanup in executor to avoid blocking
-            loop = asyncio.get_running_loop()
-            await loop.run_in_executor(None, self.prompt_logger.remove_log, log_file)
 
         # Process and return response (keeping sync processor for simplicity)
         return self.response_processor.process(response)
@@ -175,31 +153,22 @@ class AsyncLLMClient:
         """Execute with async retry logic"""
         for attempt in range(self.retry_strategy.max_retries):
             try:
-                # Check if provider supports ainvoke (LangChain)
-                if hasattr(self.provider, 'ainvoke'):
-                    # Use LangChain's async support
-                    if isinstance(prompt, str):
-                        response = await asyncio.wait_for(
-                            self.provider.ainvoke(prompt_text),
-                            timeout=self.request_timeout
-                        )
-                    elif hasattr(prompt, 'format'):
-                        formatted_prompt = prompt.format(**kwargs)
-                        response = await asyncio.wait_for(
-                            self.provider.ainvoke(formatted_prompt),
-                            timeout=self.request_timeout
-                        )
-                    else:
-                        response = await asyncio.wait_for(
-                            self.provider.ainvoke(str(prompt)),
-                            timeout=self.request_timeout
-                        )
+                # Use LangChain's async support
+                if isinstance(prompt, str):
+                    response = await asyncio.wait_for(
+                        self.provider.ainvoke(prompt_text),
+                        timeout=self.request_timeout
+                    )
+                elif hasattr(prompt, 'format'):
+                    formatted_prompt = prompt.format(**kwargs)
+                    response = await asyncio.wait_for(
+                        self.provider.ainvoke(formatted_prompt),
+                        timeout=self.request_timeout
+                    )
                 else:
-                    # Fallback to sync in executor (temporary bridge)
-                    loop = asyncio.get_running_loop()
-                    response = await loop.run_in_executor(
-                        None,
-                        partial(self._sync_invoke, prompt, kwargs, prompt_text)
+                    response = await asyncio.wait_for(
+                        self.provider.ainvoke(str(prompt)),
+                        timeout=self.request_timeout
                     )
 
                 return response
@@ -215,14 +184,6 @@ class AsyncLLMClient:
                 else:
                     raise e
 
-    def _sync_invoke(self, prompt, kwargs, prompt_text):
-        """Helper for sync fallback"""
-        if isinstance(prompt, str):
-            return self.provider.invoke(prompt_text)
-        elif hasattr(prompt, 'format'):
-            return self.provider.invoke(prompt.format(**kwargs))
-        else:
-            return self.provider.invoke(str(prompt))
 
     def _format_prompt(self, prompt, kwargs: Dict[str, Any]) -> str:
         """Format prompt into text - reuse logic from sync client"""
@@ -286,17 +247,14 @@ def create_async_json_llm(
     temperature: float = 0.0,
     max_tokens: int = 8000,
     provider: str = "openai",
-    api_key_env: Optional[str] = None,
-    enable_logging: bool = True
+    api_key_env: Optional[str] = None
 ) -> AsyncLLMClient:
     """Create an async LLM client with JSON response parsing"""
     config = LLMConfig(model_name, temperature, max_tokens, provider, api_key_env)
-    prompt_logger = PromptLogger() if enable_logging else None
 
     return AsyncLLMClient(
         config,
-        response_processor=JSONResponseProcessor(),
-        prompt_logger=prompt_logger
+        response_processor=JSONResponseProcessor()
     )
 
 
@@ -307,8 +265,7 @@ def create_async_rate_limited_llm(
     provider: str = "openai",
     api_key_env: Optional[str] = None,
     rate_limit_config = None,
-    parse_json: bool = False,
-    enable_logging: bool = True
+    parse_json: bool = False
 ) -> AsyncLLMClient:
     """Create an async LLM client with rate limiting"""
     from utils import RateLimitConfig  # Import here to avoid circular imports
@@ -318,11 +275,9 @@ def create_async_rate_limited_llm(
     rate_limiter = AsyncDualRateLimiter(rate_config)
 
     response_processor = JSONResponseProcessor() if parse_json else RawResponseProcessor()
-    prompt_logger = PromptLogger() if enable_logging else None
 
     return AsyncLLMClient(
         config,
         rate_limiter=rate_limiter,
-        response_processor=response_processor,
-        prompt_logger=prompt_logger
+        response_processor=response_processor
     )

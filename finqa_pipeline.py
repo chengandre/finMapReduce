@@ -134,6 +134,15 @@ class FinQAPipeline(BaseMapReduceQA):
         """Delegate to output formatter."""
         return self.output_formatter.get_evaluation_formatter_type()
 
+    # Async method overrides for better performance when using async LLM clients
+    async def invoke_llm_map_async(self, chunk: Any, question: str) -> Dict[str, Any]:
+        """Async version of invoke_llm_map, delegate to formatter."""
+        return await self.output_formatter.invoke_llm_map_async(chunk, question)
+
+    async def invoke_llm_reduce_async(self, formatted_results: Any, question: str) -> Any:
+        """Async version of invoke_llm_reduce, delegate to formatter."""
+        return await self.output_formatter.invoke_llm_reduce_async(formatted_results, question)
+
     # Question improvement for hybrid format
     def improve_question(self, original_question: str) -> Tuple[str, Dict[str, int]]:
         """

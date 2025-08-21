@@ -55,17 +55,8 @@ class AsyncLLMJudgeEvaluator:
         context = "<evaluation_items>\n" + "\n".join(context_parts) + "\n</evaluation_items>"
 
         try:
-            # For AsyncLLMClient, always use its async invoke method
-            if hasattr(self.llm, 'invoke') and asyncio.iscoroutinefunction(self.llm.invoke):
-                # This is AsyncLLMClient - use its async invoke method
-                judge_response = await self.llm.invoke(self.judge_prompt, context=context)
-            else:
-                # This is a sync LLM client - fallback to sync in executor
-                loop = asyncio.get_running_loop()
-                judge_response = await loop.run_in_executor(
-                    None,
-                    partial(self.llm.invoke, self.judge_prompt, context=context)
-                )
+            # Use async invoke method
+            judge_response = await self.llm.invoke(self.judge_prompt, context=context)
 
             # Extract token usage (reuse existing method)
             tokens = self._extract_token_usage_from_response(judge_response)
