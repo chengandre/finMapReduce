@@ -101,15 +101,6 @@ class FinQAPipeline(BaseMapReduceQA):
         """Delegate to dataset loader."""
         return self.dataset_loader.get_map_question(qa_pair)
 
-    # Delegate to output formatter
-    def invoke_llm_map(self, chunk: Any, question: str) -> Dict[str, Any]:
-        """Delegate to output formatter."""
-        return self.output_formatter.invoke_llm_map(chunk, question)
-
-    def invoke_llm_reduce(self, formatted_results: Any, question: str) -> Any:
-        """Delegate to output formatter."""
-        return self.output_formatter.invoke_llm_reduce(formatted_results, question)
-
     def preprocess_map_results(self, results: List[Dict[str, Any]]) -> List[Any]:
         """Delegate to output formatter."""
         return self.output_formatter.preprocess_map_results(results)

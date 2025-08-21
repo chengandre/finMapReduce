@@ -36,34 +36,6 @@ class OutputFormatter(ABC):
         self.reduce_llm = reduce_llm
 
     @abstractmethod
-    def invoke_llm_map(self, chunk: Any, question: str) -> Dict[str, Any]:
-        """
-        Invoke LLM for map phase using format-specific approach.
-
-        Args:
-            chunk: Document chunk with page_content attribute
-            question: The question to answer
-
-        Returns:
-            Dictionary with format-specific response structure
-        """
-        pass
-
-    @abstractmethod
-    def invoke_llm_reduce(self, formatted_results: Any, question: str) -> Any:
-        """
-        Invoke LLM for reduce phase using format-specific approach.
-
-        Args:
-            formatted_results: Formatted map results
-            question: The original question
-
-        Returns:
-            Format-specific response object
-        """
-        pass
-
-    @abstractmethod
     def preprocess_map_results(self, results: List[Dict[str, Any]]) -> List[Any]:
         """
         Filter/preprocess map phase results before reduce phase.

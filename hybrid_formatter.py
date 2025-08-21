@@ -30,48 +30,6 @@ class HybridFormatter(OutputFormatter):
         self.question_improvement_llm = question_improvement_llm
         self.score_threshold = score_threshold
 
-    def invoke_llm_map(self, chunk: Any, question: str) -> Dict[str, Any]:
-        """
-        Map phase using direct LLM invocation for text output.
-
-        Args:
-            chunk: Document chunk with page_content attribute
-            question: The question to answer
-
-        Returns:
-            Dictionary with 'content' and 'usage' keys
-        """
-        prompt = self.prompts_dict['map_prompt'].format(
-            context=chunk.page_content,
-            question_int=question
-        )
-
-        response = self.map_llm.invoke(prompt)
-
-        if hasattr(response, 'usage_metadata') and response.usage_metadata:
-            return {
-                'content': response.content,
-                'usage': response.usage_metadata
-            }
-        return {'content': response.content, 'usage': None}
-
-    def invoke_llm_reduce(self, formatted_results: Any, question: str) -> Any:
-        """
-        Reduce phase using GPT wrapper for JSON output.
-
-        Args:
-            formatted_results: Formatted string of map results
-            question: The original question
-
-        Returns:
-            Dictionary with 'json' and 'raw_response' keys
-        """
-        reduce_prompt = self.prompts_dict['reduce_prompt'].format(
-            context=formatted_results,
-            question=question
-        )
-        return self.reduce_llm.invoke(reduce_prompt)
-
     def preprocess_map_results(self, results: List[Dict[str, Any]]) -> List[str]:
         """
         Filter based on score extraction from text.

@@ -26,47 +26,6 @@ class PlainTextFormatter(OutputFormatter):
         super().__init__(prompts_dict)
         self.score_threshold = score_threshold
 
-    def invoke_llm_map(self, chunk: Any, question: str) -> Dict[str, Any]:
-        """
-        Direct LLM invocation for map phase with text output.
-
-        Args:
-            chunk: Document chunk with page_content attribute
-            question: The question to answer
-
-        Returns:
-            Dictionary with 'content' and 'usage' keys
-        """
-        prompt = self.prompts_dict['map_prompt'].format(
-            context=chunk.page_content,
-            question_int=question
-        )
-
-        response = self.map_llm.invoke(prompt)
-
-        if hasattr(response, 'usage_metadata') and response.usage_metadata:
-            return {
-                'content': response.content,
-                'usage': response.usage_metadata
-            }
-        return {'content': response.content, 'usage': None}
-
-    def invoke_llm_reduce(self, formatted_results: Any, question: str) -> Any:
-        """
-        Direct LLM invocation for reduce phase.
-
-        Args:
-            formatted_results: String of concatenated results
-            question: The original question
-
-        Returns:
-            LLM response object
-        """
-        prompt = self.prompts_dict['reduce_prompt'].format(
-            summaries=formatted_results,
-            question_final=question
-        )
-        return self.reduce_llm.invoke(prompt)
 
     def preprocess_map_results(self, results: List[Dict[str, Any]]) -> List[str]:
         """

@@ -1,7 +1,8 @@
 import asyncio
 import argparse
 
-from utils import RateLimitConfig, load_prompt_set
+from utils import load_prompt_set
+from async_llm_client import RateLimitConfig
 from async_llm_client import create_async_rate_limited_llm
 from factory import MapReducePipelineFactory
 

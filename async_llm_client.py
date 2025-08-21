@@ -1,15 +1,255 @@
 import asyncio
 import time
-from functools import partial
+import os
+import re
+import json
+import json5
+import tiktoken
+import uuid
 from typing import Any, Dict, Optional, Protocol, runtime_checkable
-from types import SimpleNamespace
 from dataclasses import dataclass
+from pathlib import Path
+from pydantic import SecretStr
+from langchain_openai import ChatOpenAI
 
-from utils import (
-    LLMConfig, LLMProviderFactory, TokenEstimator,
-    ResponseProcessor, RawResponseProcessor, JSONResponseProcessor,
-    RetryStrategy
-)
+
+# ============================================================================
+# Configuration and Data Classes
+# ============================================================================
+
+@dataclass
+class LLMConfig:
+    """Configuration for LLM models"""
+    model_name: str
+    temperature: float
+    max_tokens: int
+    provider: str = "openai"
+    api_key_env: Optional[str] = None
+    base_url: Optional[str] = None
+
+
+@dataclass
+class RateLimitConfig:
+    """Configuration for rate limiting"""
+    requests_per_minute: int = 5000
+    tokens_per_minute: int = 4000000
+    request_burst_size: int = 500
+    token_burst_size: Optional[int] = None
+
+    def __post_init__(self):
+        if self.token_burst_size is None:
+            self.token_burst_size = int(self.tokens_per_minute / 60 * 2)
+
+
+# ============================================================================
+# Provider Factory
+# ============================================================================
+
+class LLMProviderFactory:
+    """Factory for creating configured LLM providers"""
+
+    @staticmethod
+    def create_provider(config: LLMConfig) -> ChatOpenAI:
+        """Create a configured LLM provider based on config"""
+        api_key, base_url = LLMProviderFactory._get_credentials(config)
+
+        return ChatOpenAI(
+            model=config.model_name,
+            api_key=api_key,
+            temperature=config.temperature,
+            max_tokens=config.max_tokens,
+            base_url=base_url,
+            max_retries=50
+        )
+
+    @staticmethod
+    def _get_credentials(config: LLMConfig) -> tuple[SecretStr, Optional[str]]:
+        """Get API credentials based on provider and key configuration"""
+        if config.provider.lower() == "openrouter":
+            api_key = SecretStr(os.getenv("OPENROUTER_API_KEY", ""))
+            base_url = config.base_url or "https://openrouter.ai/api/v1"
+        else:  # OpenAI
+            key_mapping = {
+                "self": "SELF_OPENAI_API_KEY",
+                "elm": "ELM_OPENAI_API_KEY",
+                None: "OPENAI_API_KEY"
+            }
+            env_var = key_mapping.get(config.api_key_env, "SELF_OPENAI_API_KEY")
+            api_key = SecretStr(os.getenv(env_var, ""))
+            base_url = config.base_url
+
+        return api_key, base_url
+
+
+# ============================================================================
+# Token Estimation Strategy
+# ============================================================================
+
+class TokenEstimator:
+    """Strategy for estimating token usage"""
+
+    @staticmethod
+    def estimate(text: str, max_tokens: Optional[int] = None) -> int:
+        """
+        Estimates total token usage for a request.
+
+        Args:
+            text: The prompt text
+            max_tokens: Maximum completion tokens (if specified)
+
+        Returns:
+            Estimated total tokens with 15% safety buffer
+        """
+        try:
+            encoding = tiktoken.get_encoding("cl100k_base")
+            prompt_tokens = len(encoding.encode(text))
+        except Exception:
+            # Fallback to character-based estimation
+            prompt_tokens = len(text) // 4
+
+        completion_tokens = max_tokens if max_tokens else 0
+        total_tokens = int((prompt_tokens + completion_tokens) * 1.15)
+
+        return total_tokens
+
+
+# ============================================================================
+# Response Processors
+# ============================================================================
+
+@runtime_checkable
+class ResponseProcessor(Protocol):
+    """Protocol for response processors"""
+    def process(self, response: Any) -> Any:
+        """Process the LLM response"""
+        ...
+
+
+class RawResponseProcessor:
+    """Returns response as-is"""
+    def process(self, response: Any) -> Any:
+        return response
+
+
+class JSONResponseProcessor:
+    """Extracts and parses JSON from response"""
+
+    def process(self, response: Any) -> Dict[str, Any]:
+        """Parse JSON from response with multiple fallback strategies"""
+        content = response.content if hasattr(response, 'content') else str(response)
+
+        parsed_json = self._parse_json(content)
+        return {
+            'json': parsed_json,
+            'raw_response': response
+        }
+
+    def _parse_json(self, content: str) -> Any:
+        """Parse JSON from content with multiple strategies"""
+        # Try direct JSON parsing
+        try:
+            return json.loads(content)
+        except Exception:
+            try:
+                return json5.loads(content)
+            except Exception:
+                pass
+
+        # Try code blocks
+        code_block_patterns = [
+            r'```json\s*\n(.*?)\n```',
+            r'```\s*\n(.*?)\n```',
+            r'`(.*?)`'
+        ]
+
+        for pattern in code_block_patterns:
+            matches = re.findall(pattern, content, re.DOTALL)
+            for match in matches:
+                try:
+                    return json5.loads(match.strip())
+                except Exception:
+                    continue
+
+        # Try JSON object patterns
+        json_pattern = r'\{(?:[^{}]|{[^{}]*})*\}'
+        matches = re.findall(json_pattern, content, re.DOTALL)
+
+        if matches:
+            matches.sort(key=len, reverse=True)
+            for match in matches:
+                try:
+                    return json5.loads(match)
+                except Exception:
+                    continue
+
+        raise ValueError(f"Invalid JSON response. Content:\n{content}")
+
+
+# ============================================================================
+# Retry Strategy
+# ============================================================================
+
+class RetryStrategy:
+    """Configurable retry strategy for API calls"""
+
+    def __init__(self, max_retries: int = 50, base_delay: float = 2.0, max_delay: float = 60.0):
+        self.max_retries = max_retries
+        self.base_delay = base_delay
+        self.max_delay = max_delay
+        self.retryable_errors = [
+            "Internal Server Error", "500", "502", "503", "504",
+            "timeout", "connection", "rate limit", "too many requests"
+        ]
+
+    def should_retry(self, error: Exception, attempt: int) -> bool:
+        """Determine if we should retry based on error and attempt number"""
+        if attempt >= self.max_retries:
+            return False
+
+        # Check for specific timeout exceptions by type
+        import asyncio
+        if isinstance(error, (asyncio.TimeoutError, TimeoutError)):
+            return True
+
+        # Check for JSON parsing errors (these should be retryable)
+        if isinstance(error, ValueError) and "Invalid JSON response" in str(error):
+            return True
+
+        error_str = str(error).lower()
+        return any(err.lower() in error_str for err in self.retryable_errors)
+
+    def get_delay(self, attempt: int) -> float:
+        """Calculate delay for the given attempt"""
+        return min(self.base_delay * (2 ** attempt), self.max_delay)
+
+
+# ============================================================================
+# Prompt Logger
+# ============================================================================
+
+class PromptLogger:
+    """Handles logging of prompts for debugging"""
+
+    def __init__(self, log_dir: str = "prompts_log"):
+        self.log_dir = Path(log_dir)
+        self.log_dir.mkdir(exist_ok=True)
+
+    def log_prompt(self, prompt_data: Dict[str, Any]) -> Path:
+        """Log a prompt and return the log file path"""
+        prompt_id = str(uuid.uuid4())
+        prompt_file = self.log_dir / f"prompt_{prompt_id}.json"
+
+        prompt_data['timestamp'] = time.time()
+
+        with open(prompt_file, "w", encoding="utf-8") as f:
+            json.dump(prompt_data, f, indent=2)
+
+        return prompt_file
+
+    def remove_log(self, log_file: Path) -> None:
+        """Remove a log file if it exists"""
+        if log_file.exists():
+            log_file.unlink()
 
 
 # ============================================================================
@@ -268,8 +508,6 @@ def create_async_rate_limited_llm(
     parse_json: bool = False
 ) -> AsyncLLMClient:
     """Create an async LLM client with rate limiting"""
-    from utils import RateLimitConfig  # Import here to avoid circular imports
-
     config = LLMConfig(model_name, temperature, max_tokens, provider, api_key_env)
     rate_config = rate_limit_config or RateLimitConfig()
     rate_limiter = AsyncDualRateLimiter(rate_config)

@@ -10,7 +10,7 @@ import time
 from langchain.prompts import load_prompt
 from tqdm import tqdm
 
-from utils import create_rate_limited_llm, RateLimitConfig
+from async_llm_client import create_async_rate_limited_llm, RateLimitConfig
 import numpy as np
 from sklearn.metrics import precision_recall_fscore_support, confusion_matrix
 

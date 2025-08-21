@@ -8,7 +8,7 @@ from langchain.prompts import PromptTemplate
 # Add parent directory to path to import utils
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from utils import create_rate_limited_llm, RateLimitConfig, LLMClient
+from async_llm_client import create_async_rate_limited_llm, RateLimitConfig, AsyncLLMClient
 
 
 class TestLLMClientIntegration:
