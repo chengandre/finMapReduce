@@ -34,8 +34,8 @@ def _resolve_document_path(document_file):
 
     Search locations for document names:
     - Current directory
-    - ../financebench/data/ (for FinanceBench PDFs)
-    - ../edgartools_finqa/ (for FinQA markdown files)
+    - ./financebench/pdfs/ (for FinanceBench PDFs)
+    - ./finqa/markdowns/ (for FinQA markdown files)
 
     Args:
         document_file (str): Document name, relative path, or absolute path
@@ -63,8 +63,8 @@ def _resolve_document_path(document_file):
     if not document_path.suffix:
         search_locations = [
             Path.cwd(),  # Current directory
-            Path("../financebench/pdfs"),  # FinanceBench PDFs
-            Path("../edgartools_finqa"),   # FinQA markdown files
+            Path("./financebench/pdfs"),  # FinanceBench PDFs
+            Path("./finqa/markdowns"),   # FinQA markdown files
         ]
 
         # Try both .pdf and .md extensions
@@ -81,8 +81,9 @@ def _resolve_document_path(document_file):
     if document_path.suffix:
         search_locations = [
             Path.cwd(),
-            Path("../financebench/pdfs"),
-            Path("../edgartools_finqa"),
+            Path("./financebench/pdfs"),
+            Path("./financebench/markdowns"),
+            Path("./finqa/markdowns"),
         ]
 
         for location in search_locations:
@@ -94,7 +95,7 @@ def _resolve_document_path(document_file):
     # Not found anywhere
     raise FileNotFoundError(
         f"Document '{document_file}' not found. Searched in: current directory, "
-        f"../financebench/data, ../edgartools_finqa. "
+        f"./financebench/pdfs, ./finqa/markdowns. "
         f"Please provide either a valid document name (e.g., 'APPLE_2020') or full path."
     )
 
@@ -207,7 +208,7 @@ def _marker_parser(pdf_file, force_reparse=False):
     pdf_name = pdf_path.stem
 
     # Check if pdf is already parsed from financeBench
-    financebench_markdown_path = Path("../marker_financebench") / pdf_name / f"{pdf_name}.md"
+    financebench_markdown_path = Path("./financebench/markdowns") / f"{pdf_name}.md"
     if not force_reparse and financebench_markdown_path.exists():
         # print(f"Found existing financeBench markdown for {pdf_name}: {financebench_markdown_path}")
         return str(financebench_markdown_path)
