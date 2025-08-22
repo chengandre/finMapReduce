@@ -4,44 +4,6 @@ from dataset_loader import DatasetLoader
 from utils import load_document_chunk
 
 
-def load_financebench_data(jsonl_path: str, num_samples: Optional[int] = None) -> List[Dict[str, Any]]:
-    """
-    Load QA pairs from financebench_open_source.jsonl file
-
-    Args:
-        jsonl_path: Path to the financebench jsonl file
-        num_samples: Number of samples to load
-
-    Returns:
-        List of QA dictionaries with necessary information
-    """
-    qa_data = []
-    with open(jsonl_path, 'r', encoding='utf-8') as f:
-        lines = f.readlines()
-
-    count = 0
-    for line in lines:
-        if num_samples is not None and count >= num_samples:
-            break
-
-        item = json.loads(line)
-
-        qa_pair = {
-            "doc_name": item["doc_name"],
-            "question": item["question"],
-            "answer": item["answer"],
-            "justification": item["justification"] if item["justification"] else "No justification provided",
-            "evidence": [ev["evidence_text"] for ev in item["evidence"]],
-            "question_type": item["question_type"],
-            "question_reasoning": item["question_reasoning"]
-        }
-
-        qa_data.append(qa_pair)
-        count += 1
-
-    return qa_data
-
-
 class FinanceBenchLoader(DatasetLoader):
     """
     Dataset loader for FinanceBench data.
@@ -72,7 +34,22 @@ class FinanceBenchLoader(DatasetLoader):
         Returns:
             List of QA dictionaries with question, answer, evidence, etc.
         """
-        return load_financebench_data(data_path, num_samples)
+        with open(data_path, 'r', encoding='utf-8') as f:
+            lines = f.readlines()
+
+        def transform_line(line):
+            item = json.loads(line)
+            return {
+                "doc_name": item["doc_name"],
+                "question": item["question"],
+                "answer": item["answer"],
+                "justification": item["justification"] if item["justification"] else "No justification provided",
+                "evidence": [ev["evidence_text"] for ev in item["evidence"]],
+                "question_type": item["question_type"],
+                "question_reasoning": item["question_reasoning"]
+            }
+
+        return self._process_data_samples(lines, num_samples, transform_line)
 
     def load_document_chunks(self, qa_pair: Dict[str, Any], chunk_size: int, chunk_overlap: int) -> Tuple[List[Any], int]:
         """

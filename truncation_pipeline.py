@@ -36,12 +36,12 @@ class TruncationPipeline(BasePipeline):
             **kwargs
         )
 
-        # Store composed components
+        # Store composed components using base class properties
         self.dataset_loader = dataset_loader
-        self.truncation_formatter = truncation_formatter
+        self.formatter = truncation_formatter
 
         # Set LLM instance for the formatter
-        self.truncation_formatter.set_llm(self.llm)
+        self.formatter.set_llm(self.llm)
 
         # Initialize evaluator now that all components are ready
         self._initialize_evaluator()
@@ -75,7 +75,7 @@ class TruncationPipeline(BasePipeline):
         # Step 2: Truncate document using formatter
         try:
             start_time = time.time()
-            truncated_text, truncation_stats = self.truncation_formatter.truncate_document(doc_text, question)
+            truncated_text, truncation_stats = self.formatter.truncate_document(doc_text, question)
             truncation_time = time.time() - start_time
         except Exception as e:
             print(f"Error truncating document for {self.get_document_identifier(qa_pair)}: {e}")
@@ -84,7 +84,7 @@ class TruncationPipeline(BasePipeline):
         # Step 3: Single LLM call with truncated document
         try:
             llm_start_time = time.time()
-            llm_result = await self.truncation_formatter.ainvoke_llm_truncation(truncated_text, question)
+            llm_result = await self.formatter.ainvoke_llm_truncation(truncated_text, question)
             llm_time = time.time() - llm_start_time
         except Exception as e:
             print(f"Error in LLM call for {self.get_document_identifier(qa_pair)}: {e}")
@@ -92,7 +92,7 @@ class TruncationPipeline(BasePipeline):
 
         # Step 4: Parse result using formatter
         try:
-            parsed_results = self.truncation_formatter.parse_final_result(llm_result)
+            parsed_results = self.formatter.parse_final_result(llm_result)
             qa_pair.update(parsed_results)
         except Exception as e:
             print(f"Error parsing result for {self.get_document_identifier(qa_pair)}: {e}")
@@ -121,43 +121,23 @@ class TruncationPipeline(BasePipeline):
             "timing_summary": timing_averages,
         }
 
-    # ===== Dataset Loader Delegation =====
-
-    def load_data(self, data_path: str, num_samples: Optional[int] = None) -> List[Dict[str, Any]]:
-        """Delegate to dataset loader."""
-        return self.dataset_loader.load_data(data_path, num_samples)
-
-    def get_document_identifier(self, qa_pair: Dict[str, Any]) -> str:
-        """Delegate to dataset loader."""
-        return self.dataset_loader.get_document_identifier(qa_pair)
+    # ===== Dataset-specific Method Overrides =====
 
     def get_results_directory(self) -> str:
-        """Delegate to dataset loader."""
-        return "truncation_results"  # Override for truncation-specific directory
+        """Override for truncation-specific directory."""
+        return "truncation_results"
 
     def get_dataset_name(self) -> str:
         """Get dataset name with truncation suffix."""
         base_name = self.dataset_loader.get_dataset_name()
-        strategy = getattr(self.truncation_formatter, 'strategy', 'truncation')
+        strategy = getattr(self.formatter, 'strategy', 'truncation')
         return f"{base_name}_{strategy}"
-
-    def load_document_chunks(self, qa_pair: Dict[str, Any]) -> Tuple[List[Any], int]:
-        """Load document chunks - for compatibility with batch loading in base class."""
-        return self.dataset_loader.load_document_chunks(qa_pair, self.chunk_size, self.chunk_overlap)
 
     async def _load_document_for_qa_async(self, qa_pair: Dict[str, Any]) -> Tuple[str, int]:
         """Load full document for truncation approach."""
         return self.dataset_loader.load_full_document(qa_pair)
 
-    # ===== Truncation Formatter Delegation =====
-
-    def get_judge_prompt_key(self) -> str:
-        """Delegate to truncation formatter."""
-        return self.truncation_formatter.get_judge_prompt_key()
-
-    def get_evaluation_formatter_type(self) -> Optional[str]:
-        """Delegate to truncation formatter."""
-        return self.truncation_formatter.get_evaluation_formatter_type()
+    # ===== Truncation-specific Helper Methods =====
 
     # ===== Batch Document Loading Override =====
 
@@ -241,7 +221,7 @@ class TruncationPipeline(BasePipeline):
         results["configuration"] = self.dataset_loader.add_dataset_config(results["configuration"])
 
         # Add truncation-specific config
-        results["configuration"] = self.truncation_formatter.add_truncation_config(results["configuration"])
+        results["configuration"] = self.formatter.add_truncation_config(results["configuration"])
 
         return results
 
@@ -252,7 +232,7 @@ class TruncationPipeline(BasePipeline):
         return {
             "original_document_tokens": 0,
             "truncation_stats": {
-                "strategy": getattr(self.truncation_formatter, 'strategy', 'unknown'),
+                "strategy": getattr(self.formatter, 'strategy', 'unknown'),
                 "truncated_tokens": 0,
                 "retention_rate": 0.0,
                 "truncation_applied": False
@@ -266,24 +246,6 @@ class TruncationPipeline(BasePipeline):
             "total": {"input_tokens": 0, "output_tokens": 0, "cache_read_tokens": 0}
         }
 
-    def _extract_token_usage_from_response(self, response: Any) -> Dict[str, int]:
-        """Extract token usage from LLM response."""
-        tokens = {"input_tokens": 0, "output_tokens": 0, "cache_read_tokens": 0}
-
-        if isinstance(response, dict):
-            raw_response = response.get('raw_response')
-            if raw_response and hasattr(raw_response, 'usage_metadata') and raw_response.usage_metadata:
-                tokens["input_tokens"] = raw_response.usage_metadata.get("input_tokens", 0)
-                tokens["output_tokens"] = raw_response.usage_metadata.get("output_tokens", 0)
-                input_token_details = raw_response.usage_metadata.get("input_token_details", {})
-                tokens["cache_read_tokens"] = input_token_details.get("cache_read", 0)
-        elif hasattr(response, 'usage_metadata') and response.usage_metadata:
-            tokens["input_tokens"] = response.usage_metadata.get("input_tokens", 0)
-            tokens["output_tokens"] = response.usage_metadata.get("output_tokens", 0)
-            input_token_details = response.usage_metadata.get("input_token_details", {})
-            tokens["cache_read_tokens"] = input_token_details.get("cache_read", 0)
-
-        return tokens
 
     def _compile_token_stats(self, original_tokens: int, truncation_stats: Dict,
                             llm_tokens: Dict, llm_time: float, truncation_time: float) -> Dict:
@@ -309,9 +271,9 @@ class TruncationPipeline(BasePipeline):
         retention_rates = []
         truncations_applied = 0
 
-        strategy = getattr(self.truncation_formatter, 'strategy', 'unknown')
-        context_window = getattr(self.truncation_formatter, 'context_window', 0)
-        truncation_buffer = getattr(self.truncation_formatter, 'buffer', 0)
+        strategy = getattr(self.formatter, 'strategy', 'unknown')
+        context_window = getattr(self.formatter, 'context_window', 0)
+        truncation_buffer = getattr(self.formatter, 'buffer', 0)
 
         for qa_pair in qa_data:
             token_stats = qa_pair.get('token_stats', {})

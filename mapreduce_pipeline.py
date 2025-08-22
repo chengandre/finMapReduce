@@ -25,6 +25,8 @@ class MapReducePipeline(BasePipeline):
                  map_llm: Optional[Any] = None,
                  reduce_llm: Optional[Any] = None,
                  question_improvement_llm: Optional[Any] = None,
+                 chunk_size: int = 36000,
+                 chunk_overlap: int = 1000,
                  **kwargs):
         """
         Initialize MapReduce pipeline with composed strategies.
@@ -38,26 +40,35 @@ class MapReducePipeline(BasePipeline):
             map_llm: LLM for map phase (hybrid format only)
             reduce_llm: LLM for reduce phase (hybrid format only)
             question_improvement_llm: LLM for question preprocessing (hybrid format only)
+            chunk_size: Size of document chunks for processing
+            chunk_overlap: Overlap between consecutive chunks
             **kwargs: Additional arguments passed to base class
         """
+        # Add MapReduce-specific parameters to config
+        kwargs.update({
+            'chunk_size': chunk_size,
+            'chunk_overlap': chunk_overlap,
+            'format_type': format_type
+        })
+        
         super().__init__(
             llm=llm,
             prompts_dict=prompts_dict,
-            map_llm=map_llm,
-            reduce_llm=reduce_llm,
             **kwargs
         )
+        
+        # MapReduce-specific LLM handling
+        self.map_llm = map_llm if map_llm is not None else llm
+        self.reduce_llm = reduce_llm if reduce_llm is not None else llm
 
-        # Store dataset loader
+        # Store composed components using base class properties
         self.dataset_loader = dataset_loader
-
-        # Initialize output formatter based on format_type
-        self.output_formatter = self._create_formatter(
+        self.formatter = self._create_formatter(
             format_type, prompts_dict, score_threshold, question_improvement_llm
         )
 
         # Set LLM instances for the formatter
-        self.output_formatter.set_llms(self.map_llm, self.reduce_llm)
+        self.formatter.set_llms(self.map_llm, self.reduce_llm)
 
         self.format_type = format_type
 
@@ -79,58 +90,35 @@ class MapReducePipeline(BasePipeline):
         else:
             raise ValueError(f"Unknown format_type: {format_type}. Must be 'json', 'plain_text', or 'hybrid'")
 
-    # ===== Dataset Loader Delegation =====
-
-    def load_data(self, data_path: str, num_samples: Optional[int] = None) -> List[Dict[str, Any]]:
-        """Delegate to dataset loader."""
-        return self.dataset_loader.load_data(data_path, num_samples)
-
-    def load_document_chunks(self, qa_pair: Dict[str, Any]) -> Tuple[List[Any], int]:
-        """Delegate to dataset loader."""
-        return self.dataset_loader.load_document_chunks(qa_pair, self.chunk_size, self.chunk_overlap)
-
-    def get_document_identifier(self, qa_pair: Dict[str, Any]) -> str:
-        """Delegate to dataset loader."""
-        return self.dataset_loader.get_document_identifier(qa_pair)
-
-    def get_results_directory(self) -> str:
-        """Delegate to dataset loader."""
-        return self.dataset_loader.get_results_directory()
+    # ===== Dataset-specific Methods =====
 
     def get_dataset_name(self) -> str:
-        """Get dataset name with format suffix."""
+        """Override to get dataset name with format suffix."""
         base_name = self.dataset_loader.get_dataset_name()
-        return f"{base_name}_{self.format_type}"
+        format_type = self.config.get('format_type', 'unknown')
+        return f"{base_name}_{format_type}"
 
     def get_map_question(self, qa_pair: Dict[str, Any]) -> str:
-        """Delegate to dataset loader."""
+        """Get the question to use for the map phase."""
         return self.dataset_loader.get_map_question(qa_pair)
 
     # ===== Output Formatter Delegation =====
 
     def preprocess_map_results(self, results: List[Dict[str, Any]]) -> List[Any]:
         """Delegate to output formatter."""
-        return self.output_formatter.preprocess_map_results(results)
+        return self.formatter.preprocess_map_results(results)
 
     def format_map_results_for_reduce(self, results: List[Any], question: str) -> Union[str, Dict]:
         """Delegate to output formatter."""
-        return self.output_formatter.format_map_results_for_reduce(results, question)
+        return self.formatter.format_map_results_for_reduce(results, question)
 
     def parse_final_result(self, result: Any) -> Dict[str, Any]:
         """Delegate to output formatter."""
-        return self.output_formatter.parse_final_result(result)
+        return self.formatter.parse_final_result(result)
 
     def parse_final_result_with_map_data(self, reduce_result: Any, map_results: List[Any]) -> Dict[str, Any]:
         """Delegate to output formatter."""
-        return self.output_formatter.parse_final_result_with_map_data(reduce_result, map_results)
-
-    def get_judge_prompt_key(self) -> str:
-        """Delegate to output formatter."""
-        return self.output_formatter.get_judge_prompt_key()
-
-    def get_evaluation_formatter_type(self) -> Optional[str]:
-        """Delegate to output formatter."""
-        return self.output_formatter.get_evaluation_formatter_type()
+        return self.formatter.parse_final_result_with_map_data(reduce_result, map_results)
 
     # ===== Pipeline Implementation (Abstract Methods) =====
 
@@ -216,11 +204,11 @@ class MapReducePipeline(BasePipeline):
 
     async def ainvoke_llm_map(self, chunk: Any, question: str) -> Dict[str, Any]:
         """Async version of invoke_llm_map, delegate to formatter."""
-        return await self.output_formatter.ainvoke_llm_map(chunk, question)
+        return await self.formatter.ainvoke_llm_map(chunk, question)
 
     async def ainvoke_llm_reduce(self, formatted_results: Any, question: str) -> Any:
         """Async version of invoke_llm_reduce, delegate to formatter."""
-        return await self.output_formatter.ainvoke_llm_reduce(formatted_results, question)
+        return await self.formatter.ainvoke_llm_reduce(formatted_results, question)
 
 
     # ===== Results Compilation =====
@@ -236,7 +224,7 @@ class MapReducePipeline(BasePipeline):
         results["configuration"] = self.dataset_loader.add_dataset_config(results["configuration"])
 
         # Add format-specific config
-        results["configuration"] = self.output_formatter.add_format_config(results["configuration"])
+        results["configuration"] = self.formatter.add_format_config(results["configuration"])
 
         return results
 
@@ -375,8 +363,8 @@ class MapReducePipeline(BasePipeline):
         score_threshold = None
 
         # Check if this pipeline uses score-based filtering
-        if hasattr(self, 'output_formatter'):
-            formatter = getattr(self, 'output_formatter', None)
+        if hasattr(self, 'formatter'):
+            formatter = getattr(self, 'formatter', None)
             if formatter and hasattr(formatter, 'score_threshold'):
                 score_threshold = getattr(formatter, 'score_threshold', None)
 

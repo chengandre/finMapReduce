@@ -5,41 +5,6 @@ from dataset_loader import DatasetLoader
 from utils import load_document_chunk
 
 
-def load_finqa_data(json_path: str, num_samples: Optional[int] = None) -> List[Dict[str, Any]]:
-    """
-    Load QA pairs from FinQA json file
-
-    Args:
-        json_path: Path to the FinQA json file
-        num_samples: Number of samples to load
-
-    Returns:
-        List of QA dictionaries with necessary information
-    """
-    with open(json_path, 'r', encoding='utf-8') as f:
-        data = json.load(f)
-
-    qa_data = []
-    count = 0
-
-    for item in data:
-        if num_samples is not None and count >= num_samples:
-            break
-
-        qa_pair = {
-            "doc_name": item["doc_name"],
-            "question": item["question"],
-            "answer": item["answer"],
-            "filename": item.get("filename", ""),
-            "explanation": item.get("explanation", "")
-        }
-
-        qa_data.append(qa_pair)
-        count += 1
-
-    return qa_data
-
-
 class FinQALoader(DatasetLoader):
     """
     Dataset loader for FinQA data.
@@ -70,7 +35,19 @@ class FinQALoader(DatasetLoader):
         Returns:
             List of QA dictionaries
         """
-        return load_finqa_data(data_path, num_samples)
+        with open(data_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+
+        def transform_item(item):
+            return {
+                "doc_name": item["doc_name"],
+                "question": item["question"],
+                "answer": item["answer"],
+                "filename": item.get("filename", ""),
+                "explanation": item.get("explanation", "")
+            }
+
+        return self._process_data_samples(data, num_samples, transform_item)
 
     def load_document_chunks(self, qa_pair: Dict[str, Any], chunk_size: int, chunk_overlap: int) -> Tuple[List[Any], int]:
         """

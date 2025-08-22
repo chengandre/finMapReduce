@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import Dict, List, Any, Tuple, Optional
+from typing import Dict, List, Any, Tuple, Optional, Callable
 
 
 class DatasetLoader(ABC):
@@ -117,3 +117,31 @@ class DatasetLoader(ABC):
         """
         config["dataset"] = self.get_dataset_name()
         return config
+
+    @staticmethod
+    def _process_data_samples(data_items, num_samples: Optional[int] = None, transform_func=None):
+        """
+        Helper method to process data samples with optional limiting and transformation.
+        
+        Reduces code duplication in data loading methods.
+        
+        Args:
+            data_items: Iterable of data items to process
+            num_samples: Number of samples to process (None for all)
+            transform_func: Function to transform each item (None for identity)
+            
+        Returns:
+            List of processed items
+        """
+        processed_data = []
+        count = 0
+        
+        for item in data_items:
+            if num_samples is not None and count >= num_samples:
+                break
+                
+            processed_item = transform_func(item) if transform_func else item
+            processed_data.append(processed_item)
+            count += 1
+            
+        return processed_data

@@ -3,7 +3,6 @@ from typing import Dict, List, Any, Tuple, Optional, Union
 from async_evaluation import AsyncLLMJudgeEvaluator
 import concurrent.futures
 from tqdm import tqdm
-import time
 import json
 import os
 import asyncio
@@ -17,43 +16,63 @@ class BasePipeline(ABC):
     This class provides the core pipeline workflow and parallel processing
     infrastructure, while allowing subclasses to customize specific behaviors
     through abstract methods. Can support various pipeline architectures beyond MapReduce.
+    
+    Subclasses must set self.dataset_loader and self.formatter (or equivalent) components
+    for delegation methods to work properly.
     """
 
     def __init__(self,
                  llm: Any,
                  prompts_dict: Dict[str, Any],
-                 chunk_size: int = 36000,
-                 chunk_overlap: int = 1000,
-                 pdf_parser: str = 'marker',
                  max_total_requests: int = 300,
-                 map_llm: Optional[Any] = None,
-                 reduce_llm: Optional[Any] = None,
-                 judge_llm: Optional[Any] = None):
+                 judge_llm: Optional[Any] = None,
+                 **kwargs):
         """
-        Initialize the MapReduce QA pipeline.
+        Initialize the QA pipeline.
 
         Args:
             llm: Primary language model instance
             prompts_dict: Dictionary containing prompt templates
-            chunk_size: Size of document chunks for processing
-            chunk_overlap: Overlap between consecutive chunks
             max_total_requests: Maximum total concurrent requests across entire pipeline
-            map_llm: Optional separate LLM for map phase (defaults to llm)
-            reduce_llm: Optional separate LLM for reduce phase (defaults to llm)
             judge_llm: Optional separate LLM for evaluation (defaults to llm)
+            **kwargs: Additional pipeline-specific arguments (chunk_size, pdf_parser, etc.)
         """
         self.llm = llm
-        self.map_llm = map_llm if map_llm is not None else llm
-        self.reduce_llm = reduce_llm if reduce_llm is not None else llm
         self.judge_llm = judge_llm if judge_llm is not None else llm
         self.prompts_dict = prompts_dict
-        self.chunk_size = chunk_size
-        self.chunk_overlap = chunk_overlap
-        self.pdf_parser = pdf_parser
         self.max_total_requests = max_total_requests
         self.global_semaphore = asyncio.Semaphore(max_total_requests)
+        
+        # Store additional config for subclass use
+        self.config = kwargs
 
         self.judge_evaluator = None
+
+    # ===== COMPONENT PROPERTIES =====
+    
+    @property
+    def dataset_loader(self):
+        """Access to dataset loader component - must be set by subclasses."""
+        if not hasattr(self, '_dataset_loader'):
+            raise NotImplementedError("Subclasses must set self.dataset_loader or override delegation methods")
+        return self._dataset_loader
+    
+    @dataset_loader.setter 
+    def dataset_loader(self, value):
+        self._dataset_loader = value
+
+    @property
+    def formatter(self):
+        """Access to formatter component - must be set by subclasses."""
+        if not hasattr(self, '_formatter'):
+            raise NotImplementedError("Subclasses must set self.formatter or override delegation methods")
+        return self._formatter
+        
+    @formatter.setter
+    def formatter(self, value):
+        self._formatter = value
+
+    # ===== INITIALIZATION & SETUP =====
 
     def _initialize_evaluator(self):
         """Initialize the judge evaluator after subclass components are ready."""
@@ -64,7 +83,7 @@ class BasePipeline(ABC):
                 formatter_type=self.get_evaluation_formatter_type()
             )
 
-    # ===== Abstract Methods - Must be implemented by subclasses =====
+    # ===== ABSTRACT CORE METHODS - Pipeline-specific implementations =====
 
     @abstractmethod
     async def process_single_qa_async(self, qa_pair: Dict[str, Any], document_cache: Optional[Dict[str, Tuple[List[Any], int]]] = None) -> Dict[str, Any]:
@@ -93,49 +112,49 @@ class BasePipeline(ABC):
         """
         pass
 
-    # ===== Template Methods - Can be overridden if needed =====
-    # These are delegated to subclasses or their composed components
-
     @abstractmethod
+    def _empty_token_stats(self) -> Dict[str, Any]:
+        """Return empty token statistics structure - pipeline specific."""
+        pass
+
+    # ===== CONCRETE DELEGATION METHODS =====
+    # These delegate to composed components (dataset_loader, formatter)
+
     def get_document_identifier(self, qa_pair: Dict[str, Any]) -> str:
         """Get a display name for the document being processed."""
-        pass
+        return self.dataset_loader.get_document_identifier(qa_pair)
 
-    @abstractmethod
     def get_results_directory(self) -> str:
         """Get the directory name for saving results."""
-        pass
+        return self.dataset_loader.get_results_directory()
 
-    @abstractmethod
     def get_dataset_name(self) -> str:
         """Get the name of the dataset."""
-        pass
+        return self.dataset_loader.get_dataset_name()
 
-    @abstractmethod
     def get_judge_prompt_key(self) -> str:
         """Get the key for judge prompt in prompts_dict."""
-        pass
+        return self.formatter.get_judge_prompt_key()
 
-    @abstractmethod
     def get_evaluation_formatter_type(self) -> Optional[str]:
         """
         Get the evaluation formatter type for this pipeline.
         Returns None to use auto-detection.
         """
-        pass
+        return self.formatter.get_evaluation_formatter_type()
 
-    @abstractmethod
     def load_document_chunks(self, qa_pair: Dict[str, Any]) -> Tuple[List[Any], int]:
         """Load document chunks for a QA pair - delegates to composed components."""
-        pass
+        chunk_size = self.config.get('chunk_size', 36000)
+        chunk_overlap = self.config.get('chunk_overlap', 1000)
+        return self.dataset_loader.load_document_chunks(qa_pair, chunk_size, chunk_overlap)
 
-    @abstractmethod
     def load_data(self, data_path: str, num_samples: Optional[int] = None) -> List[Dict[str, Any]]:
         """Load QA data from the given path - delegates to composed components."""
-        pass
+        return self.dataset_loader.load_data(data_path, num_samples)
 
 
-    # ===== Async Methods =====
+    # ===== DOCUMENT LOADING METHODS =====
 
     async def _batch_load_documents_async(self, qa_data: List[Dict[str, Any]]) -> Dict[str, Tuple[List[Any], int]]:
         """
@@ -209,14 +228,7 @@ class BasePipeline(ABC):
 
         return document_cache
 
-    async def ainvoke_llm_judge(self, judge_prompt: str) -> Any:
-        """
-        Async version of invoke_llm_judge with global semaphore.
-        """
-        async with self.global_semaphore:
-            return await self.judge_llm.ainvoke(judge_prompt)
-
-    # This method is now abstract - implemented by subclasses
+    # ===== MAIN PROCESSING PIPELINE =====
 
     async def process_dataset_async(self,
                                    data_path: str,
@@ -297,37 +309,66 @@ class BasePipeline(ABC):
 
         return results
 
+    # ===== LLM INTERACTION METHODS =====
+
+    async def ainvoke_llm_judge(self, judge_prompt: str) -> Any:
+        """
+        Async version of invoke_llm_judge with global semaphore.
+        """
+        async with self.global_semaphore:
+            return await self.judge_llm.ainvoke(judge_prompt)
+
+    def _extract_token_usage_from_response(self, response: Any) -> Dict[str, int]:
+        """Extract token usage from LLM response."""
+        tokens = {"input_tokens": 0, "output_tokens": 0, "cache_read_tokens": 0}
+
+        if isinstance(response, dict):
+            raw_response = response.get('raw_response')
+            if raw_response and hasattr(raw_response, 'usage_metadata') and raw_response.usage_metadata:
+                tokens["input_tokens"] = raw_response.usage_metadata.get("input_tokens", 0)
+                tokens["output_tokens"] = raw_response.usage_metadata.get("output_tokens", 0)
+                input_token_details = raw_response.usage_metadata.get("input_token_details", {})
+                tokens["cache_read_tokens"] = input_token_details.get("cache_read", 0)
+        elif hasattr(response, 'usage_metadata') and response.usage_metadata:
+            tokens["input_tokens"] = response.usage_metadata.get("input_tokens", 0)
+            tokens["output_tokens"] = response.usage_metadata.get("output_tokens", 0)
+            input_token_details = response.usage_metadata.get("input_token_details", {})
+            tokens["cache_read_tokens"] = input_token_details.get("cache_read", 0)
+
+        return tokens
+
+    # ===== EVALUATION METHODS =====
+
     async def _evaluate_with_judge_async(self, judge_llm: Any, qa_data: List[Dict[str, Any]]) -> Dict[str, Any]:
         """
         Async version of evaluation with judge using AsyncLLMJudgeEvaluator.
         """
         return await self.judge_evaluator.evaluate_async(qa_data)
 
-    # ===== Internal Methods =====
-    # Token calculation methods moved to pipeline-specific implementations
+    # ===== ERROR HANDLING =====
 
+    def _handle_error(self, qa_pair: Dict[str, Any], error_msg: str, error_type: str = "processing") -> Dict[str, Any]:
+        """Handle pipeline errors with appropriate messages based on error type."""
+        error_messages = {
+            "document": "Error: Could not load document",
+            "processing": "Error: Processing failed",
+            "llm": "Error: LLM call failed"
+        }
+        
+        qa_pair["llm_answer"] = error_messages.get(error_type, "Error: Unknown failure")
+        qa_pair["llm_reasoning"] = error_msg if error_type == "processing" else f"{error_type.title()} failed: {error_msg}"
+        qa_pair["llm_evidence"] = []
+        qa_pair["error"] = error_msg
+        qa_pair["token_stats"] = self._empty_token_stats()
+        return qa_pair
+    
     def _handle_document_error(self, qa_pair: Dict[str, Any], error_msg: str) -> Dict[str, Any]:
-        """Handle document loading errors."""
-        qa_pair["llm_answer"] = "Error: Could not load document"
-        qa_pair["llm_reasoning"] = f"Document loading failed: {error_msg}"
-        qa_pair["llm_evidence"] = []
-        qa_pair["error"] = error_msg
-        qa_pair["token_stats"] = self._empty_token_stats()
-        return qa_pair
-
+        """Handle document loading errors - delegates to _handle_error."""
+        return self._handle_error(qa_pair, error_msg, "document")
+    
     def _handle_processing_error(self, qa_pair: Dict[str, Any], error_msg: str) -> Dict[str, Any]:
-        """Handle processing errors."""
-        qa_pair["llm_answer"] = "Error: Processing failed"
-        qa_pair["llm_reasoning"] = error_msg
-        qa_pair["llm_evidence"] = []
-        qa_pair["error"] = error_msg
-        qa_pair["token_stats"] = self._empty_token_stats()
-        return qa_pair
-
-    @abstractmethod
-    def _empty_token_stats(self) -> Dict[str, Any]:
-        """Return empty token statistics structure - pipeline specific."""
-        pass
+        """Handle processing errors - delegates to _handle_error."""
+        return self._handle_error(qa_pair, error_msg, "processing")
 
     def _print_document_info(self, qa_data: List[Dict[str, Any]]):
         """Print information about documents to be processed."""
@@ -339,7 +380,7 @@ class BasePipeline(ABC):
             print(f"... and {len(doc_names) - 10} more documents")
         print("===============================\n")
 
-    # Score analysis and filtering stats moved to pipeline-specific implementations
+    # ===== RESULT COMPILATION & OUTPUT =====
 
     def _compile_results(self, qa_data: List[Dict], evaluation_results: Dict,
                         model_name: str, judge_model_name: str, process_time: float, doc_load_time: float, **kwargs) -> Dict:
@@ -442,7 +483,14 @@ class BasePipeline(ABC):
         # Create filename
         prompt_name = self.prompts_dict.get('prompt_set_name', 'unknown')
         dataset_name = self.get_dataset_name()
-        file_prefix = f"{prompt_name}_chunk{self.chunk_size}_overlap{self.chunk_overlap}_{results['num_samples']}_{dataset_name}"
+        # Build filename with available config
+        file_parts = [prompt_name]
+        if 'chunk_size' in self.config:
+            file_parts.append(f"chunk{self.config['chunk_size']}")
+        if 'chunk_overlap' in self.config:
+            file_parts.append(f"overlap{self.config['chunk_overlap']}")
+        file_parts.extend([str(results['num_samples']), dataset_name])
+        file_prefix = "_".join(file_parts)
 
         # Add any additional identifiers from configuration
         if 'pdf_parser' in results['configuration']:
@@ -467,6 +515,8 @@ class BasePipeline(ABC):
         print(f"No answer: {evaluation_results['no_answer']} ({evaluation_results['no_answer']/evaluation_results['total']*100:.1f}%)")
         print(f"Overall Accuracy: {evaluation_results['accuracy']:.2%}")
         print("========================\n")
+
+    # ===== QUESTION PREPROCESSING METHODS =====
 
     async def _preprocess_questions_async(self, qa_data: List[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], Dict[str, int]]:
         """
@@ -526,7 +576,6 @@ class BasePipeline(ABC):
         print(f"Question improvement tokens: {total_tokens['input_tokens']} input, {total_tokens['output_tokens']} output, {total_tokens['cache_read_tokens']} cache read")
         return qa_data, total_tokens
 
-
     async def improve_question_async(self, original_question: str) -> Tuple[str, Dict[str, int]]:
         """
         Improve a single question to make it clearer and more effective using async request.
@@ -580,24 +629,7 @@ class BasePipeline(ABC):
             print(f"Error improving question, using original: {e}")
             return original_question, empty_tokens
 
-    def _extract_token_usage_from_response(self, response: Any) -> Dict[str, int]:
-        """Extract token usage from LLM response."""
-        tokens = {"input_tokens": 0, "output_tokens": 0, "cache_read_tokens": 0}
-
-        if isinstance(response, dict):
-            raw_response = response.get('raw_response')
-            if raw_response and hasattr(raw_response, 'usage_metadata') and raw_response.usage_metadata:
-                tokens["input_tokens"] = raw_response.usage_metadata.get("input_tokens", 0)
-                tokens["output_tokens"] = raw_response.usage_metadata.get("output_tokens", 0)
-                input_token_details = raw_response.usage_metadata.get("input_token_details", {})
-                tokens["cache_read_tokens"] = input_token_details.get("cache_read", 0)
-        elif hasattr(response, 'usage_metadata') and response.usage_metadata:
-            tokens["input_tokens"] = response.usage_metadata.get("input_tokens", 0)
-            tokens["output_tokens"] = response.usage_metadata.get("output_tokens", 0)
-            input_token_details = response.usage_metadata.get("input_token_details", {})
-            tokens["cache_read_tokens"] = input_token_details.get("cache_read", 0)
-
-        return tokens
+    # ===== UTILITY & SERIALIZATION =====
 
     def _serialize_prompts(self, prompts_dict: Dict[str, Any]) -> Dict[str, Any]:
         """

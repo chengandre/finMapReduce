@@ -1,10 +1,10 @@
-import time
 import tiktoken
 import subprocess
 import logging
 import pickle
 import hashlib
 import yaml
+from datetime import datetime
 
 from pathlib import Path
 from langchain.schema import Document
@@ -148,7 +148,7 @@ def _save_document_cache(cache_path, documents, token_count):
         cache_data = {
             'documents': documents,
             'token_count': token_count,
-            'timestamp': time.time()
+            'timestamp': datetime.now().timestamp()
         }
 
         with open(cache_path, 'wb') as f:
