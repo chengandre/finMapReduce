@@ -134,7 +134,7 @@ class JSONFormatter(OutputFormatter):
         return config
 
     # Async method overrides for better performance
-    async def invoke_llm_map_async(self, chunk: Any, question: str) -> Dict[str, Any]:
+    async def ainvoke_llm_map(self, chunk: Any, question: str) -> Dict[str, Any]:
         """
         Async version of invoke_llm_map.
 
@@ -147,9 +147,9 @@ class JSONFormatter(OutputFormatter):
         """
         map_prompt = self.prompts_dict['map_prompt']
 
-        return await self.map_llm.invoke(map_prompt, context=chunk.page_content, final_query=question)
+        return await self.map_llm.ainvoke(map_prompt, context=chunk.page_content, final_query=question)
 
-    async def invoke_llm_reduce_async(self, formatted_results: Any, question: str) -> Any:
+    async def ainvoke_llm_reduce(self, formatted_results: Any, question: str) -> Any:
         """
         Async version of invoke_llm_reduce.
 
@@ -162,4 +162,4 @@ class JSONFormatter(OutputFormatter):
         """
         reduce_prompt = self.prompts_dict['reduce_prompt']
 
-        return await self.reduce_llm.invoke(reduce_prompt, map_results=formatted_results, final_query=question)
+        return await self.reduce_llm.ainvoke(reduce_prompt, map_results=formatted_results, final_query=question)

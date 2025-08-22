@@ -123,7 +123,7 @@ class PlainTextFormatter(OutputFormatter):
         return config
 
     # Async method overrides for better performance
-    async def invoke_llm_map_async(self, chunk: Any, question: str) -> Dict[str, Any]:
+    async def ainvoke_llm_map(self, chunk: Any, question: str) -> Dict[str, Any]:
         """
         Async version of invoke_llm_map.
 
@@ -139,7 +139,7 @@ class PlainTextFormatter(OutputFormatter):
             question=question
         )
 
-        response = await self.map_llm.invoke(prompt)
+        response = await self.map_llm.ainvoke(prompt)
 
         if hasattr(response, 'usage_metadata') and response.usage_metadata:
             return {
@@ -152,7 +152,7 @@ class PlainTextFormatter(OutputFormatter):
                 'usage': {}
             }
 
-    async def invoke_llm_reduce_async(self, formatted_results: Any, question: str) -> Any:
+    async def ainvoke_llm_reduce(self, formatted_results: Any, question: str) -> Any:
         """
         Async version of invoke_llm_reduce.
 
@@ -168,4 +168,4 @@ class PlainTextFormatter(OutputFormatter):
             question_final=question
         )
 
-        return await self.reduce_llm.invoke(prompt)
+        return await self.reduce_llm.ainvoke(prompt)

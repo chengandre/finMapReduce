@@ -378,7 +378,7 @@ class AsyncLLMClient:
         self.token_estimator = token_estimator or TokenEstimator()
         self.request_timeout = request_timeout
 
-    async def invoke(self, prompt, **kwargs) -> Any:
+    async def ainvoke(self, prompt, **kwargs) -> Any:
         """
         Async invoke that maintains compatibility with existing response structure
         """

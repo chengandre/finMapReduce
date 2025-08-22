@@ -139,44 +139,6 @@ class HybridFormatter(OutputFormatter):
         """Use last year evaluation formatter for hybrid."""
         return "standard"
 
-    def improve_question(self, original_question: str) -> Tuple[str, Dict[str, int]]:
-        """
-        Improve a single question using the question improvement LLM.
-
-        Args:
-            original_question: The original question text
-
-        Returns:
-            Tuple of (improved question text, token usage dict)
-        """
-        empty_tokens = {"input_tokens": 0, "output_tokens": 0, "cache_read_tokens": 0}
-
-        if 'question_improvement_prompt' not in self.prompts_dict:
-            print("Warning: question_improvement_prompt not available, keeping original questions")
-            return original_question, empty_tokens
-
-        try:
-            prompt = self.prompts_dict['question_improvement_prompt'].format(question=original_question)
-            if self.question_improvement_llm:
-                response = self.question_improvement_llm.invoke(prompt)
-            else:
-                response = self.reduce_llm.invoke(prompt)
-
-            tokens = self._extract_token_usage_from_response(response)
-
-            if isinstance(response, dict) and 'json' in response:
-                json_data = response['json']
-                if isinstance(json_data, dict) and 'improved_question' in json_data:
-                    improved = json_data['improved_question'].strip()
-                    if improved:
-                        return improved, tokens
-
-            print(f"Warning: Could not parse improved question, using original")
-            return original_question, tokens
-
-        except Exception as e:
-            print(f"Error improving question, using original: {e}")
-            return original_question, empty_tokens
 
     def _extract_token_usage_from_response(self, response: Any) -> Dict[str, int]:
         """Extract token usage from LLM response."""
@@ -215,7 +177,7 @@ class HybridFormatter(OutputFormatter):
         return config
 
     # Async method overrides for better performance
-    async def invoke_llm_map_async(self, chunk: Any, question: str) -> Dict[str, Any]:
+    async def ainvoke_llm_map(self, chunk: Any, question: str) -> Dict[str, Any]:
         """
         Async version of invoke_llm_map.
 
@@ -231,7 +193,7 @@ class HybridFormatter(OutputFormatter):
             question=question
         )
 
-        response = await self.map_llm.invoke(prompt)
+        response = await self.map_llm.ainvoke(prompt)
 
         if hasattr(response, 'usage_metadata') and response.usage_metadata:
             return {
@@ -244,7 +206,7 @@ class HybridFormatter(OutputFormatter):
                 'usage': {}
             }
 
-    async def invoke_llm_reduce_async(self, formatted_results: Any, question: str) -> Any:
+    async def ainvoke_llm_reduce(self, formatted_results: Any, question: str) -> Any:
         """
         Async version of invoke_llm_reduce.
 
@@ -256,4 +218,4 @@ class HybridFormatter(OutputFormatter):
             Dictionary with 'json' and 'raw_response' keys
         """
         reduce_prompt = self.prompts_dict['reduce_prompt']
-        return await self.reduce_llm.invoke(reduce_prompt, context=formatted_results, question=question)
+        return await self.reduce_llm.ainvoke(reduce_prompt, context=formatted_results, question=question)

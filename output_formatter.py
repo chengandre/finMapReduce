@@ -146,7 +146,7 @@ class OutputFormatter(ABC):
 
     # Async methods with default implementations
     @abstractmethod
-    async def invoke_llm_map_async(self, chunk: Any, question: str) -> Dict[str, Any]:
+    async def ainvoke_llm_map(self, chunk: Any, question: str) -> Dict[str, Any]:
         """
         Async version of invoke_llm_map.
 
@@ -160,7 +160,7 @@ class OutputFormatter(ABC):
         pass
 
     @abstractmethod
-    async def invoke_llm_reduce_async(self, formatted_results: Any, question: str) -> Any:
+    async def ainvoke_llm_reduce(self, formatted_results: Any, question: str) -> Any:
         """
         Async version of invoke_llm_reduce.
 

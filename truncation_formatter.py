@@ -72,7 +72,7 @@ class TruncationFormatter:
 
         return manager.truncate_document(doc_text)
 
-    async def invoke_llm_truncation_async(self, document_text: str, question: str) -> Any:
+    async def ainvoke_llm_truncation(self, document_text: str, question: str) -> Any:
         """
         Invoke LLM with truncated document and question.
 
@@ -94,7 +94,7 @@ class TruncationFormatter:
         formatted_prompt = prompt_template.format(context=document_text, question=question)
 
         # Invoke LLM
-        return await self.llm.invoke(formatted_prompt)
+        return await self.llm.ainvoke(formatted_prompt)
 
     def parse_final_result(self, llm_result: Any) -> Dict[str, Any]:
         """

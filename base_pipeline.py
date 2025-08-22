@@ -209,12 +209,12 @@ class BasePipeline(ABC):
 
         return document_cache
 
-    async def invoke_llm_judge_async(self, judge_prompt: str) -> Any:
+    async def ainvoke_llm_judge(self, judge_prompt: str) -> Any:
         """
         Async version of invoke_llm_judge with global semaphore.
         """
         async with self.global_semaphore:
-            return await self.judge_llm.invoke(judge_prompt)
+            return await self.judge_llm.ainvoke(judge_prompt)
 
     # This method is now abstract - implemented by subclasses
 
@@ -559,7 +559,7 @@ class BasePipeline(ABC):
             llm_to_use = getattr(self, 'question_improvement_llm', None) or getattr(self, 'reduce_llm', None) or self.llm
             
             async with self.global_semaphore:
-                response = await llm_to_use.invoke_async(prompt)
+                response = await llm_to_use.ainvoke(prompt)
 
             # Extract token usage
             tokens = self._extract_token_usage_from_response(response)

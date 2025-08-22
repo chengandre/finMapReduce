@@ -283,7 +283,7 @@ async def process_batch_async(batch_id, samples_batch, prompt_template, llm, sem
     async with semaphore:
         try:
             prompt = prompt_template.format(context=context)
-            response = await llm.invoke(prompt)
+            response = await llm.ainvoke(prompt)
 
             # Get both the parsed JSON and raw response from the wrapper
             judge_response_json = response.get('json', {})

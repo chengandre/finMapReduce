@@ -214,13 +214,13 @@ class MapReducePipeline(BasePipeline):
 
     # ===== Async Method Overrides =====
 
-    async def invoke_llm_map_async(self, chunk: Any, question: str) -> Dict[str, Any]:
+    async def ainvoke_llm_map(self, chunk: Any, question: str) -> Dict[str, Any]:
         """Async version of invoke_llm_map, delegate to formatter."""
-        return await self.output_formatter.invoke_llm_map_async(chunk, question)
+        return await self.output_formatter.ainvoke_llm_map(chunk, question)
 
-    async def invoke_llm_reduce_async(self, formatted_results: Any, question: str) -> Any:
+    async def ainvoke_llm_reduce(self, formatted_results: Any, question: str) -> Any:
         """Async version of invoke_llm_reduce, delegate to formatter."""
-        return await self.output_formatter.invoke_llm_reduce_async(formatted_results, question)
+        return await self.output_formatter.ainvoke_llm_reduce(formatted_results, question)
 
 
     # ===== Results Compilation =====
@@ -267,7 +267,7 @@ class MapReducePipeline(BasePipeline):
 
         async def process_chunk(chunk, idx):
             try:
-                result = await self.invoke_llm_map_async(chunk, question)
+                result = await self.ainvoke_llm_map(chunk, question)
                 return idx, result
             except Exception as e:
                 return idx, {"error": str(e), "content": ""}
@@ -288,7 +288,7 @@ class MapReducePipeline(BasePipeline):
         formatted_results = self.format_map_results_for_reduce(map_results, question)
 
         # Invoke reduce
-        result_final = await self.invoke_llm_reduce_async(formatted_results, question)
+        result_final = await self.ainvoke_llm_reduce(formatted_results, question)
 
         reduce_time = loop.time() - reduce_start_time
 

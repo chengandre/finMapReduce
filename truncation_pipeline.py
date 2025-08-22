@@ -84,7 +84,7 @@ class TruncationPipeline(BasePipeline):
         # Step 3: Single LLM call with truncated document
         try:
             llm_start_time = time.time()
-            llm_result = await self.truncation_formatter.invoke_llm_truncation_async(truncated_text, question)
+            llm_result = await self.truncation_formatter.ainvoke_llm_truncation(truncated_text, question)
             llm_time = time.time() - llm_start_time
         except Exception as e:
             print(f"Error in LLM call for {self.get_document_identifier(qa_pair)}: {e}")

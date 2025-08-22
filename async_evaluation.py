@@ -310,7 +310,7 @@ class AsyncLLMJudgeEvaluator:
 
         try:
             # Use async invoke method
-            judge_response = await self.llm.invoke(self.judge_prompt, context=context)
+            judge_response = await self.llm.ainvoke(self.judge_prompt, context=context)
 
             # Extract token usage (reuse existing method)
             tokens = self._extract_token_usage_from_response(judge_response)
