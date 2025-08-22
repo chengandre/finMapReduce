@@ -245,8 +245,11 @@ class BasePipeline(ABC):
         doc_load_time = loop.time() - doc_load_start
         print(f"Loaded {len(document_cache)} unique documents in {doc_load_time:.1f} seconds")
 
-        # TODO: Implement async question preprocessing if needed
+        # Question preprocessing (async version)
         question_improvement_tokens = {"input_tokens": 0, "output_tokens": 0, "cache_read_tokens": 0}
+        if kwargs.get('preprocess_questions', False):
+            print("Preprocessing questions...")
+            qa_data, question_improvement_tokens = await self._preprocess_questions_async(qa_data)
 
         loop = asyncio.get_running_loop()
         t1 = loop.time()
@@ -465,9 +468,9 @@ class BasePipeline(ABC):
         print(f"Overall Accuracy: {evaluation_results['accuracy']:.2%}")
         print("========================\n")
 
-    def _preprocess_questions_parallel(self, qa_data: List[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], Dict[str, int]]:
+    async def _preprocess_questions_async(self, qa_data: List[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], Dict[str, int]]:
         """
-        Preprocess questions in parallel to make them clearer and more effective.
+        Preprocess questions using async requests to make them clearer and more effective.
 
         Args:
             qa_data: List of QA pairs with original questions
@@ -475,11 +478,11 @@ class BasePipeline(ABC):
         Returns:
             Tuple of (updated qa_data with improved questions, aggregated token usage)
         """
-        print(f"Preprocessing {len(qa_data)} questions in parallel...")
+        print(f"Preprocessing {len(qa_data)} questions using async requests...")
 
-        def improve_single_question(qa_pair):
+        async def improve_single_question_async(qa_pair):
             try:
-                improved_question, tokens = self.improve_question(qa_pair["question"])
+                improved_question, tokens = await self.improve_question_async(qa_pair["question"])
                 qa_pair["original_question"] = qa_pair["question"]
                 qa_pair["question"] = improved_question
                 return qa_pair, tokens
@@ -491,38 +494,42 @@ class BasePipeline(ABC):
         # Track total token usage
         total_tokens = {"input_tokens": 0, "output_tokens": 0, "cache_read_tokens": 0}
 
-        # Process in parallel
-        with concurrent.futures.ThreadPoolExecutor(max_workers=min(10, len(qa_data))) as executor:
-            future_to_index = {
-                executor.submit(improve_single_question, qa_pair): i
-                for i, qa_pair in enumerate(qa_data)
-            }
+        # Create async tasks for all questions
+        tasks = [
+            asyncio.create_task(improve_single_question_async(qa_pair))
+            for qa_pair in qa_data
+        ]
 
-            # Update qa_data in place and collect token usage
-            with tqdm(total=len(qa_data), desc="Improving questions", unit="question") as pbar:
-                for future in concurrent.futures.as_completed(future_to_index):
-                    original_index = future_to_index[future]
-                    try:
-                        improved_qa_pair, tokens = future.result()
-                        qa_data[original_index] = improved_qa_pair
-                        # Aggregate token usage
-                        total_tokens["input_tokens"] += tokens["input_tokens"]
-                        total_tokens["output_tokens"] += tokens["output_tokens"]
-                        total_tokens["cache_read_tokens"] += tokens["cache_read_tokens"]
-                        pbar.update(1)
-                    except Exception as e:
-                        print(f"Error processing question {original_index}: {e}")
-                        # qa_data[original_index] already has the original, no need to reassign
-                        pbar.update(1)
+        # Process tasks with progress bar
+        results = []
+        from tqdm import tqdm
+        pbar = tqdm(total=len(tasks), desc="Improving questions", unit="question")
+        for task in asyncio.as_completed(tasks):
+            try:
+                improved_qa_pair, tokens = await task
+                results.append((improved_qa_pair, tokens))
+                # Aggregate token usage
+                total_tokens["input_tokens"] += tokens["input_tokens"]
+                total_tokens["output_tokens"] += tokens["output_tokens"]
+                total_tokens["cache_read_tokens"] += tokens["cache_read_tokens"]
+                pbar.update(1)
+            except Exception as e:
+                print(f"Error processing question: {e}")
+                pbar.update(1)
+        pbar.close()
+
+        # Update qa_data with results in original order
+        for i, (improved_qa_pair, _) in enumerate(results):
+            qa_data[i] = improved_qa_pair
 
         print("Question preprocessing completed.")
         print(f"Question improvement tokens: {total_tokens['input_tokens']} input, {total_tokens['output_tokens']} output, {total_tokens['cache_read_tokens']} cache read")
         return qa_data, total_tokens
 
 
-    def improve_question(self, original_question: str) -> Tuple[str, Dict[str, int]]:
+    async def improve_question_async(self, original_question: str) -> Tuple[str, Dict[str, int]]:
         """
-        Improve a single question to make it clearer and more effective.
+        Improve a single question to make it clearer and more effective using async request.
         Uses the question_improvement_prompt if available, otherwise returns original.
 
         Args:
@@ -539,9 +546,20 @@ class BasePipeline(ABC):
             return original_question, empty_tokens
 
         try:
-            # Use the GPT wrapper's JSON parsing capability
-            prompt = self.prompts_dict['question_improvement_prompt']
-            response = self.llm.invoke(prompt, question=original_question)
+            # Use async LLM call with global semaphore for rate limiting
+            prompt_template = self.prompts_dict['question_improvement_prompt']
+            
+            # Handle both string templates and PromptTemplate objects
+            if hasattr(prompt_template, 'format'):
+                prompt = prompt_template.format(question=original_question)
+            else:
+                prompt = str(prompt_template).format(question=original_question)
+            
+            # Choose appropriate LLM (allows subclasses to override via getattr)
+            llm_to_use = getattr(self, 'question_improvement_llm', None) or getattr(self, 'reduce_llm', None) or self.llm
+            
+            async with self.global_semaphore:
+                response = await llm_to_use.invoke_async(prompt)
 
             # Extract token usage
             tokens = self._extract_token_usage_from_response(response)

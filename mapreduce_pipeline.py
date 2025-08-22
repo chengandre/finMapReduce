@@ -5,6 +5,7 @@ from dataset_loader import DatasetLoader
 from json_formatter import JSONFormatter
 from plain_text_formatter import PlainTextFormatter
 from hybrid_formatter import HybridFormatter
+import asyncio
 
 
 class MapReducePipeline(BasePipeline):
@@ -221,23 +222,6 @@ class MapReducePipeline(BasePipeline):
         """Async version of invoke_llm_reduce, delegate to formatter."""
         return await self.output_formatter.invoke_llm_reduce_async(formatted_results, question)
 
-    # ===== Question Improvement =====
-
-    def improve_question(self, original_question: str) -> Tuple[str, Dict[str, int]]:
-        """
-        Improve question if formatter supports it.
-
-        Args:
-            original_question: The original question text
-
-        Returns:
-            Tuple of (improved question text, token usage dict)
-        """
-        if hasattr(self.output_formatter, 'improve_question'):
-            return self.output_formatter.improve_question(original_question)
-        else:
-            # Default behavior from base class
-            return super().improve_question(original_question)
 
     # ===== Results Compilation =====
 
@@ -279,7 +263,6 @@ class MapReducePipeline(BasePipeline):
 
     async def _map_phase_async(self, docs: List[Any], question: str) -> Tuple[List[Dict], Dict[str, int], float]:
         """Async map phase with semaphore management."""
-        import asyncio
         start = asyncio.get_running_loop().time()
 
         async def process_chunk(chunk, idx):
@@ -298,7 +281,6 @@ class MapReducePipeline(BasePipeline):
 
     async def _reduce_phase_async(self, map_results: List[Any], question: str) -> Tuple[Any, Dict[str, int], float]:
         """Async reduce phase."""
-        import asyncio
         loop = asyncio.get_running_loop()
         reduce_start_time = loop.time()
 
