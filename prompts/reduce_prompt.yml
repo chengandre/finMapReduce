@@ -1,5 +1,5 @@
 _type: "prompt"
-input_variables:  [map_results, final_query]
+input_variables:  [map_results, question]
 template: |
   <mode>
   Absolute Mode. Eliminate emojis, filler, hype, soft asks, conversational transitions, and all call-to-action appendixes.
@@ -231,5 +231,5 @@ template: |
   </task>
 
   <final_query>
-  {final_query}
+  {question}
   </final_query>

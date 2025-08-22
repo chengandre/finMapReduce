@@ -1,0 +1,7 @@
+_type: "prompt"
+input_variables:  [summaries, question]
+template: |
+  From the following information try to answer questions related below. If you don't know the answer, just say that you don't know, don't try to make up an answer: \n\n
+  Responses: \n {summaries}?\n
+  Question: \n {question} \n
+  Answer:

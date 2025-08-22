@@ -137,7 +137,7 @@ class HybridFormatter(OutputFormatter):
 
     def get_evaluation_formatter_type(self) -> Optional[str]:
         """Use last year evaluation formatter for hybrid."""
-        return "last_year"
+        return "standard"
 
     def improve_question(self, original_question: str) -> Tuple[str, Dict[str, int]]:
         """
@@ -228,7 +228,7 @@ class HybridFormatter(OutputFormatter):
         """
         prompt = self.prompts_dict['map_prompt'].format(
             context=chunk.page_content,
-            question_int=question
+            question=question
         )
 
         response = await self.map_llm.invoke(prompt)

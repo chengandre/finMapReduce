@@ -1,5 +1,5 @@
 _type: "prompt"
-input_variables:  [summaries, question_final]
+input_variables:  [summaries, question]
 template: |
   <role>
   Act as a methodical financial analyst, supporting every conclusion with step-by-step reasoning and verifiable evidence.

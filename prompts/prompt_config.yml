@@ -1,26 +1,16 @@
 prompt_sets:
   default:
-    map_prompt: "prompts/map_prompt.yml"
-    reduce_prompt: "prompts/reduce_prompt.yml"
+    map_prompt: "prompts/map_prompt_hybrid.yml"
+    reduce_prompt: "prompts/reduce_prompt_hybrid.yml"
     judge_prompt: "prompts/judge_prompt.yml"
 
-  old:
-    map_prompt: "prompts/map_prompt_old.yml"
-    reduce_prompt: "prompts/reduce_prompt_old.yml"
-    judge_prompt: "prompts/judge_prompt.yml"
-
-  last_year:
-    map_prompt: "prompts/map_prompt_last_year.yml"
-    reduce_prompt: "prompts/reduce_prompt_last_year.yml"
-    judge_prompt: "prompts/judge_prompt_last_year.yml"
+  baseline:
+    map_prompt: "prompts/map_prompt_baseline.yml"
+    reduce_prompt: "prompts/reduce_prompt_baseline.yml"
+    judge_prompt: "prompts/judge_prompt_baseline.yml"
 
   standard:
     map_prompt: "prompts/map_prompt.yml"
-    reduce_prompt: "prompts/reduce_prompt.yml"
-    judge_prompt: "prompts/judge_prompt.yml"
-
-  wo_icl:
-    map_prompt: "prompts/map_prompt_noICL_noMODE.yml"
     reduce_prompt: "prompts/reduce_prompt.yml"
     judge_prompt: "prompts/judge_prompt.yml"
 
@@ -29,16 +19,6 @@ prompt_sets:
     reduce_prompt: "prompts/reduce_prompt_hybrid.yml"
     judge_prompt: "prompts/judge_prompt.yml"
     question_improvement_prompt: "prompts/question_improvement_prompt.yml"
-
-  test:
-    map_prompt: "prompts/map_prompt_test.yml"
-    reduce_prompt: "prompts/reduce_prompt_test.yml"
-    judge_prompt: "prompts/judge_prompt.yml"
-
-  last_year_json:
-    map_prompt: "prompts/map_prompt_last_year_xml_json.yml"
-    reduce_prompt: "prompts/reduce_prompt_last_year_json.yml"
-    judge_prompt: "prompts/judge_prompt_last_year.yml"
 
   direct:
     map_prompt: "prompts/direct_prompt.yml"

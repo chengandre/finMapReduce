@@ -4,7 +4,7 @@ import argparse
 from utils import load_prompt_set
 from async_llm_client import RateLimitConfig
 from async_llm_client import create_async_rate_limited_llm
-from factory import MapReducePipelineFactory
+from factory import PipelineFactory
 
 
 async def main_async():
@@ -15,6 +15,9 @@ async def main_async():
     parser.add_argument('--dataset', type=str, required=True,
                        choices=['financebench', 'finqa'],
                        help='Dataset/pipeline type to run')
+    parser.add_argument('--approach', type=str, default='mapreduce',
+                       choices=['mapreduce', 'truncation'],
+                       help='Pipeline approach to use')
     parser.add_argument('--format_type', type=str, default='hybrid',
                         choices=['json', 'hybrid', 'plain_text'])
     parser.add_argument('--data-path', type=str, default=None,
@@ -49,6 +52,17 @@ async def main_async():
     parser.add_argument('--pdf_parser', type=str, default='marker',
                        help='PDF parsing method to use (default: marker)')
 
+    # Truncation-specific settings (only used when approach='truncation')
+    parser.add_argument('--strategy', type=str, default='start',
+                       choices=['start', 'end', 'smart'],
+                       help='Truncation strategy for truncation approach')
+    parser.add_argument('--context_window', type=int, default=128000,
+                       help='Maximum context window size for truncation approach')
+    parser.add_argument('--buffer', type=int, default=2000,
+                       help='Safety buffer for response tokens in truncation approach')
+    parser.add_argument('--max-document-tokens', type=int, default=None,
+                       help='Override for max document tokens in truncation approach')
+
     # Rate limiting
     parser.add_argument('--requests-per-minute', type=int, default=30000,
                        help='Requests per minute rate limit')
@@ -80,18 +94,23 @@ async def main_async():
         if args.format_type == 'hybrid':
             prompt_set = 'hybrid'
         elif args.format_type == 'plain_text':
-            prompt_set = 'last_year'
+            prompt_set = 'baseline'
         else:
             prompt_set = 'default'
     else:
         prompt_set = args.prompt
 
-    print(f"Starting async MapReduce pipeline for {args.dataset}")
+    print(f"Starting async {args.approach} pipeline for {args.dataset}")
     print(f"Data path: {data_path}")
+    print(f"Approach: {args.approach}")
     print(f"Format type: {args.format_type}")
     print(f"Model: {args.model_name} (Provider: {args.provider})")
     print(f"Prompt set: {prompt_set}")
     print(f"API key: {args.key}")
+    if args.approach == 'truncation':
+        print(f"Truncation strategy: {args.strategy}")
+        print(f"Context window: {args.context_window}")
+        print(f"Buffer: {args.buffer}")
 
     # Load prompts
     try:
@@ -109,36 +128,49 @@ async def main_async():
     )
     judge_rate_config = rate_config
 
-    # Configure LLMs based on dataset and format_type
+    # Configure LLMs based on approach and format_type
     map_llm = None
     reduce_llm = None
     judge_llm = None
     llm_client = None
 
-    if args.format_type == 'hybrid':
-        # Hybrid: separate map (text) and reduce (JSON) LLMs
-        map_llm = create_async_rate_limited_llm(
-            model_name=args.model_name,
-            temperature=args.temperature,
-            max_tokens=args.max_tokens,
-            provider=args.provider,
-            api_key_env=args.key,
-            rate_limit_config=rate_config,
-            parse_json=False
-        )
-        reduce_llm = create_async_rate_limited_llm(
-            model_name=args.model_name,
-            temperature=args.temperature,
-            max_tokens=args.max_tokens,
-            provider=args.provider,
-            api_key_env=args.key,
-            rate_limit_config=rate_config,
-            parse_json=True
-        )
-        llm_client = reduce_llm  # Primary LLM for base class
+    if args.approach == 'mapreduce':
+        if args.format_type == 'hybrid':
+            # Hybrid: separate map (text) and reduce (JSON) LLMs
+            map_llm = create_async_rate_limited_llm(
+                model_name=args.model_name,
+                temperature=args.temperature,
+                max_tokens=args.max_tokens,
+                provider=args.provider,
+                api_key_env=args.key,
+                rate_limit_config=rate_config,
+                parse_json=False
+            )
+            reduce_llm = create_async_rate_limited_llm(
+                model_name=args.model_name,
+                temperature=args.temperature,
+                max_tokens=args.max_tokens,
+                provider=args.provider,
+                api_key_env=args.key,
+                rate_limit_config=rate_config,
+                parse_json=True
+            )
+            llm_client = reduce_llm  # Primary LLM for base class
 
-    else:
-        # Standard FinanceBench (json): JSON parsing
+        else:
+            # Standard MapReduce (json): JSON parsing
+            llm_client = create_async_rate_limited_llm(
+                model_name=args.model_name,
+                temperature=args.temperature,
+                max_tokens=args.max_tokens,
+                provider=args.provider,
+                api_key_env=args.key,
+                rate_limit_config=rate_config,
+                parse_json=args.format_type == 'json'
+            )
+
+    else:  # truncation approach
+        # Truncation: single LLM with JSON parsing (format_type is ignored for truncation)
         llm_client = create_async_rate_limited_llm(
             model_name=args.model_name,
             temperature=args.temperature,
@@ -146,7 +178,7 @@ async def main_async():
             provider=args.provider,
             api_key_env=args.key,
             rate_limit_config=rate_config,
-            parse_json=args.format_type == 'json'
+            parse_json=False
         )
 
     # Judge LLM for hybrid: gpt-5-nano
@@ -160,15 +192,19 @@ async def main_async():
         parse_json=True
     )
 
-    print(f"Created LLM configuration for {args.dataset} + {args.format_type}")
-    if map_llm and reduce_llm:
-        print(f"  Map LLM: {args.model_name} (text output)")
-        print(f"  Reduce LLM: {args.model_name} (JSON output)")
-    else:
-        json_mode = 'unknown'
-        if llm_client and hasattr(llm_client, 'response_processor'):
-            json_mode = llm_client.response_processor.__class__.__name__ == 'JSONResponseProcessor'
-        print(f"  Main LLM: {args.model_name} (JSON: {json_mode})")
+    print(f"Created LLM configuration for {args.dataset} + {args.approach} + {args.format_type}")
+    if args.approach == 'mapreduce':
+        if map_llm and reduce_llm:
+            print(f"  Map LLM: {args.model_name} (text output)")
+            print(f"  Reduce LLM: {args.model_name} (JSON output)")
+        else:
+            json_mode = 'unknown'
+            if llm_client and hasattr(llm_client, 'response_processor'):
+                json_mode = llm_client.response_processor.__class__.__name__ == 'JSONResponseProcessor'
+            print(f"  Main LLM: {args.model_name} (JSON: {json_mode})")
+    else:  # truncation
+        print(f"  Truncation LLM: {args.model_name} (JSON: False)")
+
     judge_model_name = 'unknown'
     if judge_llm and hasattr(judge_llm, 'get_model_name'):
         judge_model_name = judge_llm.get_model_name()
@@ -176,29 +212,55 @@ async def main_async():
 
     # Create pipeline
     try:
-        pipeline_kwargs = {
-            'dataset': args.dataset,
-            'format_type': args.format_type,
-            'llm': llm_client,
-            'prompts_dict': prompts_dict,
-            'chunk_size': args.chunk_size,
-            'chunk_overlap': args.chunk_overlap,
-            'pdf_parser': args.pdf_parser,
-            'score_threshold': args.score_threshold,
-            'max_total_requests': args.max_total_requests
-        }
+        if args.approach == 'mapreduce':
+            # MapReduce pipeline
+            pipeline_kwargs = {
+                'dataset': args.dataset,
+                'format_type': args.format_type,
+                'llm': llm_client,
+                'prompts_dict': prompts_dict,
+                'chunk_size': args.chunk_size,
+                'chunk_overlap': args.chunk_overlap,
+                'pdf_parser': args.pdf_parser,
+                'score_threshold': args.score_threshold,
+                'max_total_requests': args.max_total_requests
+            }
 
-        # Add dataset-specific arguments
-        if args.dataset == 'finqa':
-            pipeline_kwargs['doc_dir'] = args.doc_dir
+            # Add dataset-specific arguments
+            if args.dataset == 'finqa':
+                pipeline_kwargs['doc_dir'] = args.doc_dir
 
-        # Add LLM configuration based on format type
-        if args.format_type == 'hybrid' and map_llm and reduce_llm:
-            pipeline_kwargs['map_llm'] = map_llm
-            pipeline_kwargs['reduce_llm'] = reduce_llm
+            # Add LLM configuration based on format type
+            if args.format_type == 'hybrid' and map_llm and reduce_llm:
+                pipeline_kwargs['map_llm'] = map_llm
+                pipeline_kwargs['reduce_llm'] = reduce_llm
 
-        pipeline = MapReducePipelineFactory.create_pipeline(**pipeline_kwargs)
-        print(f"Created {args.dataset} + {args.format_type} pipeline")
+            pipeline = PipelineFactory.create_pipeline(**pipeline_kwargs)
+            print(f"Created {args.dataset} + {args.approach} + {args.format_type} pipeline")
+
+        else:  # truncation approach
+            # Truncation pipeline
+            pipeline_kwargs = {
+                'dataset': args.dataset,
+                'strategy': args.strategy,
+                'context_window': args.context_window,
+                'buffer': args.buffer,
+                'llm': llm_client,
+                'prompts_dict': prompts_dict,
+                'pdf_parser': args.pdf_parser,
+                'max_total_requests': args.max_total_requests
+            }
+
+            # Add optional max_document_tokens if provided
+            if args.max_document_tokens is not None:
+                pipeline_kwargs['max_document_tokens'] = args.max_document_tokens
+
+            # Add dataset-specific arguments
+            if args.dataset == 'finqa':
+                pipeline_kwargs['doc_dir'] = args.doc_dir
+
+            pipeline = PipelineFactory.create_truncation_pipeline(**pipeline_kwargs)
+            print(f"Created {args.dataset} + {args.approach} + {args.strategy} pipeline")
     except Exception as e:
         print(f"Error creating pipeline: {e}")
         import traceback

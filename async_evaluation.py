@@ -83,7 +83,7 @@ class StandardEvaluationFormatter(EvaluationFormatter):
         )
 
 
-class LastYearEvaluationFormatter(EvaluationFormatter):
+class BaselineEvaluationFormatter(EvaluationFormatter):
     """
     Formatter for last year's evaluation format.
 
@@ -196,7 +196,7 @@ class EvaluationFormatterFactory:
     # Registry of formatters
     _formatters: Dict[str, Type[EvaluationFormatter]] = {
         'standard': StandardEvaluationFormatter,
-        'last_year': LastYearEvaluationFormatter,
+        'baseline': BaselineEvaluationFormatter,
         'simple': SimpleAnswerEvaluationFormatter,
         'detailed': DetailedEvaluationFormatter,
     }
@@ -231,7 +231,7 @@ class EvaluationFormatterFactory:
 
         # Check for last year format
         if 'llm_answer' in sample:
-            return LastYearEvaluationFormatter()
+            return BaselineEvaluationFormatter()
 
 
         # Default to simple format

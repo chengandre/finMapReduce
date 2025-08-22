@@ -42,6 +42,19 @@ class DatasetLoader(ABC):
         pass
 
     @abstractmethod
+    def load_full_document(self, qa_pair: Dict[str, Any]) -> Tuple[str, int]:
+        """
+        Load the full document content for a QA pair (for truncation approaches).
+
+        Args:
+            qa_pair: Dictionary containing document information
+
+        Returns:
+            Tuple of (full document text, total token count)
+        """
+        pass
+
+    @abstractmethod
     def get_document_identifier(self, qa_pair: Dict[str, Any]) -> str:
         """
         Get a display name for the document being processed.

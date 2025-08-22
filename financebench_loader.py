@@ -99,6 +99,57 @@ class FinanceBenchLoader(DatasetLoader):
 
         return documents, token_count
 
+    def load_full_document(self, qa_pair: Dict[str, Any]) -> Tuple[str, int]:
+        """
+        Load the full document content for a QA pair (for truncation approaches).
+
+        Args:
+            qa_pair: Dictionary containing 'doc_name' key
+
+        Returns:
+            Tuple of (full document text, total token count)
+        """
+        from utils import _marker_parser, num_tokens_from_string
+        from pathlib import Path
+
+        doc_name = qa_pair["doc_name"]
+
+        try:
+            # First try to use marker parser to get markdown
+            if self.pdf_parser == "marker":
+                # Use the same path resolution logic as utils.py
+                from utils import _resolve_document_path
+                try:
+                    pdf_path = _resolve_document_path(doc_name)
+                except FileNotFoundError:
+                    raise FileNotFoundError(f"PDF file not found for {doc_name}")
+
+                # Parse with marker
+                markdown_path = _marker_parser(str(pdf_path))
+                if markdown_path and Path(markdown_path).exists():
+                    with open(markdown_path, 'r', encoding='utf-8') as f:
+                        full_text = f.read()
+                else:
+                    raise Exception(f"Marker parsing failed for {doc_name}")
+
+            else:
+                # Use other PDF parsing methods
+                # Load chunks first, then concatenate
+                documents, _ = self.load_document_chunks(qa_pair, 100000, 0)  # Large chunk to get full doc
+                if documents:
+                    full_text = "\n\n".join([doc.page_content for doc in documents])
+                else:
+                    raise Exception(f"No content loaded for {doc_name}")
+
+            # Calculate token count
+            token_count = num_tokens_from_string(full_text, "cl100k_base")
+
+            return full_text, token_count
+
+        except Exception as e:
+            print(f"Error loading full document for {doc_name}: {e}")
+            return "", 0
+
     def get_document_identifier(self, qa_pair: Dict[str, Any]) -> str:
         """Get document name for display."""
         return qa_pair.get("doc_name", "unknown")

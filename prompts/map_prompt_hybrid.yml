@@ -1,5 +1,5 @@
 _type: "prompt"
-input_variables: [context, question_int]
+input_variables: [context, question]
 template: |
   <role>
   Act as a methodical financial analyst, supporting every conclusion with step-by-step reasoning and verifiable evidence.
@@ -30,5 +30,5 @@ template: |
   Context:
   {context}
   Question:
-  {question_int}
+  {question}
   Helpful Answer:

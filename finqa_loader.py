@@ -96,6 +96,35 @@ class FinQALoader(DatasetLoader):
 
         return documents, token_count
 
+    def load_full_document(self, qa_pair: Dict[str, Any]) -> Tuple[str, int]:
+        """
+        Load the full document content for a QA pair (for truncation approaches).
+
+        Args:
+            qa_pair: Dictionary containing 'doc_name' key
+
+        Returns:
+            Tuple of (full document text, total token count)
+        """
+        from utils import num_tokens_from_string
+
+        doc_name = qa_pair["doc_name"]
+        markdown_file = os.path.join(self.doc_dir, doc_name)
+
+        try:
+            # Read the full markdown file
+            with open(markdown_file, 'r', encoding='utf-8') as f:
+                full_text = f.read()
+
+            # Calculate token count
+            token_count = num_tokens_from_string(full_text, "cl100k_base")
+
+            return full_text, token_count
+
+        except Exception as e:
+            print(f"Error loading full document for {doc_name}: {e}")
+            return "", 0
+
     def get_document_identifier(self, qa_pair: Dict[str, Any]) -> str:
         """Get document name for display."""
         return qa_pair.get("doc_name", "unknown")

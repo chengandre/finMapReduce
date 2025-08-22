@@ -9,13 +9,13 @@ import asyncio
 from datetime import datetime
 
 
-class BaseMapReduceQA(ABC):
+class BasePipeline(ABC):
     """
-    Abstract base class for MapReduce-based Question Answering pipelines.
+    Abstract base class for Question Answering pipelines.
 
-    This class provides the core MapReduce workflow and parallel processing
+    This class provides the core pipeline workflow and parallel processing
     infrastructure, while allowing subclasses to customize specific behaviors
-    through abstract methods.
+    through abstract methods. Can support various pipeline architectures beyond MapReduce.
     """
 
     def __init__(self,
@@ -55,100 +55,72 @@ class BaseMapReduceQA(ABC):
     # ===== Abstract Methods - Must be implemented by subclasses =====
 
     @abstractmethod
-    def load_data(self, data_path: str, num_samples: Optional[int] = None) -> List[Dict[str, Any]]:
-        """Load QA data from dataset-specific format."""
-        pass
-
-
-    @abstractmethod
-    def preprocess_map_results(self, results: List[Dict[str, Any]]) -> List[Any]:
-        """Filter/preprocess map phase results before reduce phase."""
-        pass
-
-    @abstractmethod
-    def format_map_results_for_reduce(self, results: List[Any], question: str) -> Union[str, Dict]:
-        """Format map results for the reduce phase."""
-        pass
-
-    @abstractmethod
-    def parse_final_result(self, result: Any) -> Dict[str, Any]:
-        """Parse the final result from reduce phase into standardized format."""
-        pass
-
-    def parse_final_result_with_map_data(self, reduce_result: Any, map_results: List[Any]) -> Dict[str, Any]:
+    async def process_single_qa_async(self, qa_pair: Dict[str, Any], document_cache: Optional[Dict[str, Tuple[List[Any], int]]] = None) -> Dict[str, Any]:
         """
-        Parse final result with access to both map and reduce results.
-
-        Default implementation just calls parse_final_result for backward compatibility.
-        Subclasses can override to use map_results for llm_evidence.
+        Process a single QA pair using pipeline-specific approach.
 
         Args:
-            reduce_result: Result from reduce phase
-            map_results: Filtered results from map phase (after preprocessing)
+            qa_pair: QA pair to process
+            document_cache: Optional cache of preloaded documents {doc_identifier: (docs, token_count)}
 
         Returns:
-            Dictionary with llm_answer, llm_reasoning, llm_evidence
+            Updated qa_pair with results and token statistics
         """
-        return self.parse_final_result(reduce_result)
+        pass
+
+    @abstractmethod
+    def compile_statistics(self, qa_data: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """
+        Compile pipeline-specific statistics from processed QA data.
+
+        Args:
+            qa_data: List of processed QA pairs with token_stats
+
+        Returns:
+            Dictionary with pipeline-specific statistics (e.g., phase_token_totals, filtering_effectiveness)
+        """
+        pass
 
     # ===== Template Methods - Can be overridden if needed =====
+    # These are delegated to subclasses or their composed components
 
+    @abstractmethod
     def get_document_identifier(self, qa_pair: Dict[str, Any]) -> str:
         """Get a display name for the document being processed."""
-        return qa_pair.get("doc_name", "unknown")
+        pass
 
+    @abstractmethod
     def get_results_directory(self) -> str:
         """Get the directory name for saving results."""
-        return "results"
+        pass
 
+    @abstractmethod
     def get_dataset_name(self) -> str:
         """Get the name of the dataset."""
-        return "unknown"
+        pass
 
+    @abstractmethod
     def get_judge_prompt_key(self) -> str:
         """Get the key for judge prompt in prompts_dict."""
-        return 'judge_prompt'
+        pass
 
+    @abstractmethod
     def get_evaluation_formatter_type(self) -> Optional[str]:
         """
         Get the evaluation formatter type for this pipeline.
-
-        Override in subclasses to specify a particular formatter.
         Returns None to use auto-detection.
         """
-        return None  # Auto-detect by default
+        pass
 
-    def get_map_question(self, qa_pair) -> str:
-        """Get the map question"""
-        return qa_pair["question"]
-
+    @abstractmethod
     def load_document_chunks(self, qa_pair: Dict[str, Any]) -> Tuple[List[Any], int]:
-        """
-        Default implementation for loading PDF chunks.
+        """Load document chunks for a QA pair - delegates to composed components."""
+        pass
 
-        Args:
-            qa_pair: Dictionary containing 'doc_name' key
-
-        Returns:
-            Tuple of (list of document chunks, total token count)
-        """
-        from utils import load_document_chunk
-
-        doc_name = qa_pair["doc_name"]
-        pdf_parser = getattr(self, 'pdf_parser', 'marker')
-
-        documents, token_count = load_document_chunk(
-            doc_name,
-            self.chunk_size,
-            self.chunk_overlap,
-            method=pdf_parser
-        )
-
-        # Handle the case where load_document_chunk returns None values
-        if documents is None or token_count is None:
-            return [], 0
-
-        return documents, token_count
+    @abstractmethod
+    def load_data(self, data_path: str, num_samples: Optional[int] = None) -> List[Dict[str, Any]]:
+        """Load QA data from the given path - delegates to composed components."""
+        pass
 
 
     # ===== Async Methods =====
@@ -225,26 +197,6 @@ class BaseMapReduceQA(ABC):
 
         return document_cache
 
-    async def invoke_llm_map_async(self, chunk: Any, question: str) -> Dict[str, Any]:
-        """
-        Async version of invoke_llm_map with global semaphore.
-        Subclasses should override for specific LLM handling.
-        """
-        async with self.global_semaphore:
-            return await self.map_llm.invoke(
-                self.prompts_dict['map_prompt'].format(context=chunk.page_content, question=question)
-            )
-
-    async def invoke_llm_reduce_async(self, formatted_results: Any, question: str) -> Any:
-        """
-        Async version of invoke_llm_reduce with global semaphore.
-        Subclasses should override for specific LLM handling.
-        """
-        async with self.global_semaphore:
-            return await self.reduce_llm.invoke(
-                self.prompts_dict['reduce_prompt'].format(context=formatted_results, question=question)
-            )
-
     async def invoke_llm_judge_async(self, judge_prompt: str) -> Any:
         """
         Async version of invoke_llm_judge with global semaphore.
@@ -252,101 +204,7 @@ class BaseMapReduceQA(ABC):
         async with self.global_semaphore:
             return await self.judge_llm.invoke(judge_prompt)
 
-    async def _map_phase_async(self, docs: List[Any], question: str) -> Tuple[List[Dict], Dict[str, int], float]:
-        """Simplified async map phase without per-chunk semaphore"""
-        start = asyncio.get_running_loop().time()
-
-        async def process_chunk(chunk, idx):
-            try:
-                result = await self.invoke_llm_map_async(chunk, question)
-                return idx, result
-            except Exception as e:
-                return idx, {"error": str(e), "content": ""}
-
-        results = await asyncio.gather(
-            *(process_chunk(c, i) for i, c in enumerate(docs))
-        )
-
-        results_sorted = [r for _, r in sorted(results, key=lambda x: x[0])]
-        return results_sorted, self._calculate_map_tokens(results_sorted), asyncio.get_running_loop().time() - start
-
-    async def _reduce_phase_async(self, map_results: List[Any], question: str) -> Tuple[Any, Dict[str, int], float]:
-        """Async version of reduce phase"""
-        loop = asyncio.get_running_loop()
-        reduce_start_time = loop.time()
-
-        # Format results for reduce
-        formatted_results = self.format_map_results_for_reduce(map_results, question)
-
-        # Invoke reduce
-        result_final = await self.invoke_llm_reduce_async(formatted_results, question)
-
-        reduce_time = loop.time() - reduce_start_time
-
-        # Get token usage
-        tokens = self._calculate_reduce_tokens(result_final)
-
-        return result_final, tokens, reduce_time
-
-    async def process_single_qa_async(self, qa_pair: Dict[str, Any], document_cache: Optional[Dict[str, Tuple[List[Any], int]]] = None) -> Dict[str, Any]:
-        """
-        Async version of process_single_qa.
-        Reuses most of the sync logic but with async map/reduce phases.
-
-        Args:
-            qa_pair: QA pair to process
-            document_cache: Optional cache of preloaded documents {doc_identifier: (docs, token_count)}
-        """
-        question = qa_pair["question"]
-        map_question = self.get_map_question(qa_pair=qa_pair)
-
-        # Step 1: Get document chunks (from cache or load)
-        try:
-            if document_cache is not None:
-                doc_identifier = self.get_document_identifier(qa_pair)
-                if doc_identifier in document_cache:
-                    docs, _ = document_cache[doc_identifier]
-                else:
-                    return self._handle_document_error(qa_pair, f"Document {doc_identifier} not found in cache")
-            else:
-                # Fallback to loading individually
-                docs, _ = self.load_document_chunks(qa_pair)
-        except Exception as e:
-            print(f"Error loading document for {self.get_document_identifier(qa_pair)}: {e}")
-            return self._handle_document_error(qa_pair, str(e))
-
-        if not docs:
-            return self._handle_document_error(qa_pair, "No documents loaded")
-
-        # Step 2: Async map phase
-        map_results, map_tokens, map_time = await self._map_phase_async(docs, map_question)
-
-        if not map_results:
-            return self._handle_processing_error(qa_pair, "No results from map phase")
-
-        # Step 3: Preprocess/filter results (keep sync)
-        chunks_before_filtering = len(map_results)
-        score_analysis = self._extract_score_analysis(map_results)
-        filtered_results = self.preprocess_map_results(map_results)
-        chunks_after_filtering = len(filtered_results)
-
-        if not filtered_results:
-            return self._handle_processing_error(qa_pair, "No results after preprocessing")
-
-        # Step 4: Async reduce phase
-        final_result, reduce_tokens, reduce_time = await self._reduce_phase_async(filtered_results, question)
-
-        # Step 5: Parse and store results
-        parsed_results = self.parse_final_result_with_map_data(final_result, filtered_results)
-        qa_pair.update(parsed_results)
-
-        # Step 6: Store token statistics and timing
-        filtering_stats = self._calculate_filtering_stats(chunks_before_filtering, chunks_after_filtering, score_analysis)
-        qa_pair["token_stats"] = self._compile_token_stats(
-            len(docs), map_tokens, reduce_tokens, map_time, reduce_time, filtering_stats
-        )
-
-        return qa_pair
+    # This method is now abstract - implemented by subclasses
 
     async def process_dataset_async(self,
                                    data_path: str,
@@ -442,76 +300,7 @@ class BaseMapReduceQA(ABC):
         )
 
     # ===== Internal Methods =====
-
-    def _calculate_map_tokens(self, results: List[Dict]) -> Dict[str, int]:
-        """Calculate token usage from map phase results."""
-        input_tokens = 0
-        output_tokens = 0
-        cache_read_tokens = 0
-
-        for result in results:
-            # Handle different response formats
-            if isinstance(result, dict):
-                # GPT wrapper format
-                raw_response = result.get('raw_response')
-                if raw_response and hasattr(raw_response, 'usage_metadata') and raw_response.usage_metadata:
-                    input_tokens += raw_response.usage_metadata.get("input_tokens", 0)
-                    output_tokens += raw_response.usage_metadata.get("output_tokens", 0)
-                    # Add cache read tokens if available
-                    input_token_details = raw_response.usage_metadata.get("input_token_details", {})
-                    cache_read_tokens += input_token_details.get("cache_read", 0)
-                # Last year format
-                elif result.get('usage'):
-                    input_tokens += result['usage'].get("input_tokens", 0)
-                    output_tokens += result['usage'].get("output_tokens", 0)
-
-        return {"input_tokens": input_tokens, "output_tokens": output_tokens, "cache_read_tokens": cache_read_tokens}
-
-    def _calculate_reduce_tokens(self, result: Any) -> Dict[str, int]:
-        """Calculate token usage from reduce phase result."""
-        input_tokens = 0
-        output_tokens = 0
-        cache_read_tokens = 0
-
-        if isinstance(result, dict):
-            raw_response = result.get('raw_response')
-            if raw_response and hasattr(raw_response, 'usage_metadata') and raw_response.usage_metadata:
-                input_tokens = raw_response.usage_metadata.get("input_tokens", 0)
-                output_tokens = raw_response.usage_metadata.get("output_tokens", 0)
-                # Add cache read tokens if available
-                input_token_details = raw_response.usage_metadata.get("input_token_details", {})
-                cache_read_tokens = input_token_details.get("cache_read", 0)
-        elif hasattr(result, 'usage_metadata') and result.usage_metadata:
-            input_tokens = result.usage_metadata.get("input_tokens", 0)
-            output_tokens = result.usage_metadata.get("output_tokens", 0)
-            # Add cache read tokens if available
-            input_token_details = result.usage_metadata.get("input_token_details", {})
-            cache_read_tokens = input_token_details.get("cache_read", 0)
-
-        return {"input_tokens": input_tokens, "output_tokens": output_tokens, "cache_read_tokens": cache_read_tokens}
-
-    def _compile_token_stats(self, num_docs: int, map_tokens: Dict, reduce_tokens: Dict, map_time: float, reduce_time: float, filtering_stats: Optional[Dict] = None) -> Dict:
-        """Compile token statistics, timing, and filtering stats."""
-        stats = {
-            "len_docs": num_docs,
-            "map_phase": map_tokens,
-            "reduce_phase": reduce_tokens,
-            "timing": {
-                "map_phase_time": map_time,
-                "reduce_phase_time": reduce_time,
-                "total_time": map_time + reduce_time
-            },
-            "total": {
-                "input_tokens": map_tokens["input_tokens"] + reduce_tokens["input_tokens"],
-                "output_tokens": map_tokens["output_tokens"] + reduce_tokens["output_tokens"],
-                "cache_read_tokens": map_tokens.get("cache_read_tokens", 0) + reduce_tokens.get("cache_read_tokens", 0)
-            }
-        }
-
-        if filtering_stats:
-            stats["filtering_stats"] = filtering_stats
-
-        return stats
+    # Token calculation methods moved to pipeline-specific implementations
 
     def _handle_document_error(self, qa_pair: Dict[str, Any], error_msg: str) -> Dict[str, Any]:
         """Handle document loading errors."""
@@ -531,24 +320,10 @@ class BaseMapReduceQA(ABC):
         qa_pair["token_stats"] = self._empty_token_stats()
         return qa_pair
 
+    @abstractmethod
     def _empty_token_stats(self) -> Dict[str, Any]:
-        """Return empty token statistics structure. Note: Document loading time tracked separately at dataset level."""
-        return {
-            "len_docs": 0,
-            "map_phase": {"input_tokens": 0, "output_tokens": 0, "cache_read_tokens": 0},
-            "reduce_phase": {"input_tokens": 0, "output_tokens": 0, "cache_read_tokens": 0},
-            "timing": {
-                "map_phase_time": 0.0,
-                "reduce_phase_time": 0.0,
-                "total_time": 0.0
-            },
-            "total": {"input_tokens": 0, "output_tokens": 0, "cache_read_tokens": 0},
-            "filtering_stats": {
-                "chunks_before_filtering": 0,
-                "chunks_after_filtering": 0,
-                "filtering_retention_rate": 0.0
-            }
-        }
+        """Return empty token statistics structure - pipeline specific."""
+        pass
 
     def _print_document_info(self, qa_data: List[Dict[str, Any]]):
         """Print information about documents to be processed."""
@@ -560,146 +335,7 @@ class BaseMapReduceQA(ABC):
             print(f"... and {len(doc_names) - 10} more documents")
         print("===============================\n")
 
-    def _extract_score_analysis(self, map_results: List[Dict[str, Any]]) -> Dict[str, Any]:
-        """Extract score distribution from map results if available."""
-        import re
-
-        scores = []
-        score_threshold = None
-
-        # Check if this pipeline uses score-based filtering
-        if hasattr(self, 'output_formatter'):
-            formatter = getattr(self, 'output_formatter', None)
-            if formatter and hasattr(formatter, 'score_threshold'):
-                score_threshold = getattr(formatter, 'score_threshold', None)
-
-        for result in map_results:
-            try:
-                content = result.get('content', '')
-                if "Score:" in content:
-                    score_match = re.search(r'Score:\s*(\d+)', content)
-                    if score_match:
-                        score = int(score_match.group(1))
-                        scores.append(score)
-            except Exception:
-                pass  # Ignore score extraction errors
-
-        if scores:
-            return {
-                "score_distribution": {
-                    "scores": scores,
-                    "count": len(scores),
-                    "min": min(scores),
-                    "max": max(scores),
-                    "avg": sum(scores) / len(scores)
-                },
-                "score_threshold_used": score_threshold
-            }
-
-        return {}
-
-    def _calculate_filtering_stats(self, chunks_before: int, chunks_after: int, score_analysis: Optional[Dict] = None) -> Dict[str, Any]:
-        """Calculate filtering statistics for a single QA pair."""
-        retention_rate = chunks_after / chunks_before if chunks_before > 0 else 0.0
-        stats = {
-            "chunks_before_filtering": chunks_before,
-            "chunks_after_filtering": chunks_after,
-            "filtering_retention_rate": retention_rate
-        }
-
-        if score_analysis:
-            stats.update(score_analysis)
-
-        return stats
-
-    def _calculate_timing_averages(self, qa_data: List[Dict[str, Any]]) -> Dict[str, float]:
-        """Calculate average and median timing statistics from all QA pairs."""
-        import statistics
-
-        map_times = []
-        reduce_times = []
-        total_times = []
-
-        for qa_pair in qa_data:
-            token_stats = qa_pair.get('token_stats', {})
-            timing = token_stats.get('timing', {})
-
-            if timing:
-                map_time = timing.get('map_phase_time', 0.0)
-                reduce_time = timing.get('reduce_phase_time', 0.0)
-                total_time = timing.get('total_time', 0.0)
-
-                if map_time > 0:
-                    map_times.append(map_time)
-                if reduce_time > 0:
-                    reduce_times.append(reduce_time)
-                if total_time > 0:
-                    total_times.append(total_time)
-
-        return {
-            "average_map_phase_time": sum(map_times) / len(map_times) if map_times else 0.0,
-            "average_reduce_phase_time": sum(reduce_times) / len(reduce_times) if reduce_times else 0.0,
-            "average_total_mapreduce_time": sum(total_times) / len(total_times) if total_times else 0.0,
-            "median_map_phase_time": statistics.median(map_times) if map_times else 0.0,
-            "median_reduce_phase_time": statistics.median(reduce_times) if reduce_times else 0.0,
-            "median_total_mapreduce_time": statistics.median(total_times) if total_times else 0.0,
-            "samples_with_timing": len(total_times)
-        }
-
-    def _calculate_filtering_effectiveness(self, qa_data: List[Dict[str, Any]]) -> Dict[str, Any]:
-        """Calculate dataset-level filtering effectiveness statistics."""
-        import statistics
-
-        retention_rates = []
-        total_chunks_processed = 0
-        total_chunks_retained = 0
-        all_scores = []
-        score_threshold_used = None
-
-        for qa_pair in qa_data:
-            token_stats = qa_pair.get('token_stats', {})
-            filtering_stats = token_stats.get('filtering_stats', {})
-
-            if filtering_stats:
-                chunks_before = filtering_stats.get('chunks_before_filtering', 0)
-                chunks_after = filtering_stats.get('chunks_after_filtering', 0)
-                retention_rate = filtering_stats.get('filtering_retention_rate', 0.0)
-
-                if chunks_before > 0:
-                    retention_rates.append(retention_rate)
-                    total_chunks_processed += chunks_before
-                    total_chunks_retained += chunks_after
-
-                # Collect score data if available
-                score_distribution = filtering_stats.get('score_distribution', {})
-                if score_distribution and 'scores' in score_distribution:
-                    all_scores.extend(score_distribution['scores'])
-
-                # Get score threshold (should be consistent across QA pairs)
-                if score_threshold_used is None:
-                    score_threshold_used = filtering_stats.get('score_threshold_used')
-
-        effectiveness = {
-            "dataset_avg_retention_rate": sum(retention_rates) / len(retention_rates) if retention_rates else 0.0,
-            "dataset_median_retention_rate": statistics.median(retention_rates) if retention_rates else 0.0,
-            "total_chunks_processed": total_chunks_processed,
-            "total_chunks_retained": total_chunks_retained
-        }
-
-        # Add score analysis if scores were found
-        if all_scores:
-            effectiveness["score_distribution"] = {
-                "total_scores": len(all_scores),
-                "min": min(all_scores),
-                "max": max(all_scores),
-                "avg": sum(all_scores) / len(all_scores),
-                "median": statistics.median(all_scores)
-            }
-
-        if score_threshold_used is not None:
-            effectiveness["score_threshold_used"] = score_threshold_used
-
-        return effectiveness
+    # Score analysis and filtering stats moved to pipeline-specific implementations
 
     def _compile_results(self, qa_data: List[Dict], evaluation_results: Dict,
                         model_name: str, judge_model_name: str, process_time: float, doc_load_time: float, **kwargs) -> Dict:
@@ -711,20 +347,17 @@ class BaseMapReduceQA(ABC):
 
         token_summary = calculate_token_usage_summary(qa_data)
 
-        # Calculate phase-level token totals across dataset
-        phase_token_totals = self._calculate_phase_token_totals(qa_data)
+        # Get pipeline-specific statistics from subclass
+        pipeline_stats = self.compile_statistics(qa_data)
 
         # Add evaluation tokens if available
         evaluation_tokens = evaluation_results.get("evaluation_tokens", {"input_tokens": 0, "output_tokens": 0, "cache_read_tokens": 0})
-        phase_token_totals["evaluation_phase_total"] = evaluation_tokens
+        pipeline_stats["evaluation_phase_total"] = evaluation_tokens
 
-        # Calculate timing averages
-        timing_averages = self._calculate_timing_averages(qa_data)
-        timing_averages["document_loading_time"] = doc_load_time
-        timing_averages["total_pipeline_time"] = process_time + doc_load_time
-
-        # Calculate filtering effectiveness
-        filtering_effectiveness = self._calculate_filtering_effectiveness(qa_data)
+        # Add document loading time to timing
+        if "timing_summary" in pipeline_stats:
+            pipeline_stats["timing_summary"]["document_loading_time"] = doc_load_time
+            pipeline_stats["timing_summary"]["total_pipeline_time"] = process_time + doc_load_time
 
         # Check if question_type exists in data
         has_question_type = any('question_type' in qa for qa in qa_data)
@@ -750,10 +383,7 @@ class BaseMapReduceQA(ABC):
                 "dataset": self.get_dataset_name(),
                 "model_name": model_name,
                 "prompt_set": self.prompts_dict.get('prompt_set_name', 'unknown'),
-                "chunk_size": self.chunk_size,
-                "chunk_overlap": self.chunk_overlap,
                 "max_total_requests": self.max_total_requests,
-                "approach": "MapReduce",
                 "llm_configuration": llm_config
             },
             "execution_time": datetime.now().isoformat(),
@@ -761,9 +391,6 @@ class BaseMapReduceQA(ABC):
             "document_loading_time": doc_load_time,
             "num_samples": len(qa_data),
             "token_usage_summary": token_summary,
-            "phase_token_totals": phase_token_totals,
-            "timing_summary": timing_averages,
-            "filtering_effectiveness": filtering_effectiveness,
             "question_improvement_tokens": question_improvement_tokens,
             "qa_data": qa_data,
             "evaluations": {
@@ -791,6 +418,9 @@ class BaseMapReduceQA(ABC):
             },
             "prompts_dict": self._serialize_prompts(self.prompts_dict)
         }
+
+        # Add pipeline-specific statistics
+        results.update(pipeline_stats)
 
         # Add any additional configuration from kwargs
         for key, value in kwargs.items():
@@ -888,30 +518,6 @@ class BaseMapReduceQA(ABC):
         print(f"Question improvement tokens: {total_tokens['input_tokens']} input, {total_tokens['output_tokens']} output, {total_tokens['cache_read_tokens']} cache read")
         return qa_data, total_tokens
 
-    def _calculate_phase_token_totals(self, qa_data: List[Dict[str, Any]]) -> Dict[str, Dict[str, int]]:
-        """Calculate dataset-level token totals for map and reduce phases separately."""
-        map_totals = {"input_tokens": 0, "output_tokens": 0, "cache_read_tokens": 0}
-        reduce_totals = {"input_tokens": 0, "output_tokens": 0, "cache_read_tokens": 0}
-
-        for qa_pair in qa_data:
-            token_stats = qa_pair.get('token_stats', {})
-
-            # Aggregate map phase tokens
-            map_phase = token_stats.get('map_phase', {})
-            map_totals["input_tokens"] += map_phase.get("input_tokens", 0)
-            map_totals["output_tokens"] += map_phase.get("output_tokens", 0)
-            map_totals["cache_read_tokens"] += map_phase.get("cache_read_tokens", 0)
-
-            # Aggregate reduce phase tokens
-            reduce_phase = token_stats.get('reduce_phase', {})
-            reduce_totals["input_tokens"] += reduce_phase.get("input_tokens", 0)
-            reduce_totals["output_tokens"] += reduce_phase.get("output_tokens", 0)
-            reduce_totals["cache_read_tokens"] += reduce_phase.get("cache_read_tokens", 0)
-
-        return {
-            "map_phase_total": map_totals,
-            "reduce_phase_total": reduce_totals
-        }
 
     def improve_question(self, original_question: str) -> Tuple[str, Dict[str, int]]:
         """

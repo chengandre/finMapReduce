@@ -1,0 +1,37 @@
+_type: "prompt"
+input_variables:  [context, question]
+template: |
+  Use the following pieces of context to answer the question at the end. If you don't know the answer, just say that you don't know, don't try to make up an answer.
+
+  In addition to giving an answer, also return a score of how fully it answered the user's question.
+  This should be in the following format:
+
+  Question: [question here]
+  Helpful Answer: [answer here]
+  Score: [score between 0 and 100]
+
+  How to determine the score:
+  - Higher is a better answer
+  - Better responds fully to the asked question, with sufficient level of detail
+  - If you do not know the answer based on the context, that should be a score of o
+  - Your answer should stop right after giving the score value. Do not add anything post the answer and Score value.
+
+  Example #1
+
+  Context:
+  ---------
+  H100 is ideal for accelerating applications such as large language models, deep recommender systems, genomics and complex digital twins.
+  ---------
+  Question: What is the H100 GPU designed to accelerate?
+  Helpful Answer: The H100 GPU is designed to accelerate applications such as large language models.
+  Score: 60
+
+  ------------ MULTIPLE OTHER EXAMPLES HERE ------------
+  Begin!
+
+  Context:
+  ---------
+  {context}
+  ---------
+  Question: {question}
+  Helpful Answer:

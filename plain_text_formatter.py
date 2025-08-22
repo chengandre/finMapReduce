@@ -113,7 +113,7 @@ class PlainTextFormatter(OutputFormatter):
 
     def get_evaluation_formatter_type(self) -> Optional[str]:
         """Use last year evaluation formatter for plain text."""
-        return 'last_year'
+        return 'baseline'
 
     def add_format_config(self, config: Dict[str, Any]) -> Dict[str, Any]:
         """Add plain text formatter configuration."""
@@ -136,7 +136,7 @@ class PlainTextFormatter(OutputFormatter):
         """
         prompt = self.prompts_dict['map_prompt'].format(
             context=chunk.page_content,
-            question_int=question
+            question=question
         )
 
         response = await self.map_llm.invoke(prompt)

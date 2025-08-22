@@ -570,7 +570,7 @@ def load_prompt_set(prompt_set_name=None):
     Load all prompts for a prompt set and return loaded prompt objects
 
     Args:
-        prompt_set_name (str): Name of the prompt set to load (default, old, last_year, etc.)
+        prompt_set_name (str): Name of the prompt set to load (default, hybrid, baseline, etc.)
 
     Returns:
         dict: Dictionary containing pre-loaded prompt objects with keys:
