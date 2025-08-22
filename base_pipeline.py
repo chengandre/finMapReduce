@@ -1,5 +1,6 @@
 from abc import ABC, abstractmethod
 from typing import Dict, List, Any, Tuple, Optional, Union
+from async_evaluation import AsyncLLMJudgeEvaluator
 import concurrent.futures
 from tqdm import tqdm
 import time
@@ -51,6 +52,11 @@ class BasePipeline(ABC):
         self.pdf_parser = pdf_parser
         self.max_total_requests = max_total_requests
         self.global_semaphore = asyncio.Semaphore(max_total_requests)
+        self.judge_evaluator = AsyncLLMJudgeEvaluator(
+            llm=self.judge_llm,
+            prompts_dict=prompts_dict,
+            formatter_type=self.get_evaluation_formatter_type()
+        )
 
     # ===== Abstract Methods - Must be implemented by subclasses =====
 
@@ -286,18 +292,7 @@ class BasePipeline(ABC):
         """
         Async version of evaluation with judge using AsyncLLMJudgeEvaluator.
         """
-        from async_evaluation import evaluate_with_llm_judge_async
-
-        # Get formatter type from subclass if specified
-        formatter_type = self.get_evaluation_formatter_type()
-
-        return await evaluate_with_llm_judge_async(
-            judge_llm,
-            qa_data,
-            self.prompts_dict,
-            judge_prompt_key=self.get_judge_prompt_key(),
-            formatter_type=formatter_type
-        )
+        return await self.judge_evaluator.evaluate_async(qa_data)
 
     # ===== Internal Methods =====
     # Token calculation methods moved to pipeline-specific implementations

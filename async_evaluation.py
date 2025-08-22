@@ -255,21 +255,31 @@ class AsyncLLMJudgeEvaluator:
 
     def __init__(self,
                  llm: Any,
-                 judge_prompt: Any,
-                 batch_size: int = 5,
-                 max_workers: int = 20):
+                 prompts_dict: Dict[str, Any],
+                 formatter_type: Optional[str] = None,
+                 batch_size: int = 5):
         self.llm = llm
-        self.judge_prompt = judge_prompt
+        self.judge_prompt = prompts_dict['judge_prompt']
         self.batch_size = batch_size
-        self.max_workers = max_workers
+        self.formatter_type = formatter_type
+        
+        # Create formatter instance during initialization if type is specified
+        if formatter_type:
+            self.formatter = EvaluationFormatterFactory.create_formatter(
+                qa_data=[],  # Empty is fine when type is explicit
+                formatter_type=formatter_type
+            )
+        else:
+            self.formatter = None  # Will auto-detect during evaluate_async
 
     async def evaluate_async(self,
-                            qa_data: List[Dict[str, Any]],
-                            formatter: Optional[Any] = None) -> Dict[str, Any]:
+                            qa_data: List[Dict[str, Any]]) -> Dict[str, Any]:
         """Async evaluation maintaining same output structure"""
 
-        # Get appropriate formatter (reuse existing logic)
+        # Use pre-created formatter or auto-detect if none was specified
+        formatter = self.formatter
         if formatter is None:
+            # Auto-detect formatter based on actual qa_data
             formatter = EvaluationFormatterFactory.create_formatter(qa_data)
 
         # Prepare batches (reuse existing method)
@@ -508,48 +518,3 @@ class AsyncLLMJudgeEvaluator:
         return tokens
 
 
-# Convenience function to evaluate QA data using LLM judge (async version)
-async def evaluate_with_llm_judge_async(llm: Any,
-                                       qa_data: List[Dict[str, Any]],
-                                       prompts_dict: Dict[str, Any],
-                                       batch_size: int = 5,
-                                       judge_prompt_key: str = 'judge_prompt',
-                                       formatter_type: Optional[str] = None,
-                                       max_workers: int = 20) -> Dict[str, Any]:
-    """
-    Convenience function to evaluate QA data using LLM judge (async version).
-
-    This function maintains compatibility with existing code while using
-    the new extensible evaluation system.
-
-    Args:
-        llm: Language model instance
-        qa_data: List of QA items to evaluate
-        prompts_dict: Dictionary containing prompts
-        batch_size: Number of items per batch
-        judge_prompt_key: Key for judge prompt in prompts_dict
-        formatter_type: Specific formatter to use (auto-detected if None)
-        max_workers: Maximum concurrent workers
-
-    Returns:
-        Evaluation results dictionary
-    """
-    # Get judge prompt
-    judge_prompt = prompts_dict[judge_prompt_key]
-
-    # Create evaluator
-    evaluator = AsyncLLMJudgeEvaluator(
-        llm=llm,
-        judge_prompt=judge_prompt,
-        batch_size=batch_size,
-        max_workers=max_workers
-    )
-
-    # Get formatter
-    if formatter_type:
-        formatter = EvaluationFormatterFactory._formatters[formatter_type]()
-    else:
-        formatter = None  # Auto-detect
-
-    # Evaluate
-    return await evaluator.evaluate_async(qa_data, formatter)
