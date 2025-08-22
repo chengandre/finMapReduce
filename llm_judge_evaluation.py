@@ -1,4 +1,4 @@
-import concurrent.futures
+import asyncio
 import datetime
 import glob
 import json
@@ -272,60 +272,62 @@ def generate_confusion_matrix(y_true, y_pred, labels=None):
         "detailed": detailed_cm
     }
 
-def process_batch(batch_id, samples_batch, prompt_template, llm):
-    """Process a batch of samples using the LLMClient wrapper"""
-    batch_start_time = time.time()
+async def process_batch_async(batch_id, samples_batch, prompt_template, llm, semaphore):
+    """Async version of process_batch using the async LLM client"""
+    loop = asyncio.get_running_loop()
+    batch_start_time = loop.time()
 
     # Format samples into context
     context = format_context(samples_batch)
 
-    try:
-        prompt = prompt_template.format(context=context)
-        response = llm.invoke(prompt)
+    async with semaphore:
+        try:
+            prompt = prompt_template.format(context=context)
+            response = await llm.invoke(prompt)
 
-        # Get both the parsed JSON and raw response from the wrapper
-        judge_response_json = response.get('json', {})
-        raw_response = response.get('raw_response')
-        raw_content = raw_response.content if raw_response and hasattr(raw_response, 'content') else str(response)
+            # Get both the parsed JSON and raw response from the wrapper
+            judge_response_json = response.get('json', {})
+            raw_response = response.get('raw_response')
+            raw_content = raw_response.content if raw_response and hasattr(raw_response, 'content') else str(response)
 
-        # Extract token usage information from usage_metadata
-        token_usage = {}
-        if raw_response and hasattr(raw_response, 'usage_metadata'):
-            usage_metadata = raw_response.usage_metadata
-            token_usage = {
-                'input_tokens': usage_metadata.get('input_tokens', 0),
-                'output_tokens': usage_metadata.get('output_tokens', 0),
-                'total_tokens': usage_metadata.get('input_tokens', 0) + usage_metadata.get('output_tokens', 0)
+            # Extract token usage information from usage_metadata
+            token_usage = {}
+            if raw_response and hasattr(raw_response, 'usage_metadata'):
+                usage_metadata = raw_response.usage_metadata
+                token_usage = {
+                    'input_tokens': usage_metadata.get('input_tokens', 0),
+                    'output_tokens': usage_metadata.get('output_tokens', 0),
+                    'total_tokens': usage_metadata.get('input_tokens', 0) + usage_metadata.get('output_tokens', 0)
+                }
+
+            # Evaluate the judge's performance with validation
+            eval_results = evaluate_judge_performance(judge_response_json, samples_batch, raw_content)
+
+            if eval_results["success"]:
+                label_results = analyze_results_by_label(judge_response_json, samples_batch)
+                eval_results["label_results"] = label_results
+
+            # Add token usage and timing to results
+            batch_end_time = loop.time()
+            batch_processing_time = batch_end_time - batch_start_time
+
+            eval_results["token_usage"] = token_usage
+            eval_results["batch_processing_time"] = batch_processing_time
+
+            return eval_results
+
+        except Exception as e:
+            batch_end_time = loop.time()
+            batch_processing_time = batch_end_time - batch_start_time
+
+            return {
+                "success": False,
+                "error": f"Error processing batch {batch_id}: {str(e)}",
+                "raw_response": str(e),
+                "batch_processing_time": batch_processing_time
             }
 
-        # Evaluate the judge's performance with validation
-        eval_results = evaluate_judge_performance(judge_response_json, samples_batch, raw_content)
-
-        if eval_results["success"]:
-            label_results = analyze_results_by_label(judge_response_json, samples_batch)
-            eval_results["label_results"] = label_results
-
-        # Add token usage and timing to results
-        batch_end_time = time.time()
-        batch_processing_time = batch_end_time - batch_start_time
-
-        eval_results["token_usage"] = token_usage
-        eval_results["batch_processing_time"] = batch_processing_time
-
-        return eval_results
-
-    except Exception as e:
-        batch_end_time = time.time()
-        batch_processing_time = batch_end_time - batch_start_time
-
-        return {
-            "success": False,
-            "error": f"Error processing batch {batch_id}: {str(e)}",
-            "raw_response": str(e),
-            "batch_processing_time": batch_processing_time
-        }
-
-def main():
+async def main_async():
     # Load all samples
     all_samples = load_all_samples()
 
@@ -334,8 +336,8 @@ def main():
         return
 
     # Test mode - limit to 20 samples
-    test_mode = False  # Set to False to process all samples
-    max_samples = 5  # Number of samples to process in test mode
+    test_mode = True  # Set to False to process all samples
+    max_samples = 20  # Number of samples to process in test mode
 
     if test_mode:
         # Select a balanced subset of samples
@@ -381,7 +383,7 @@ def main():
         print(f"Test mode: Selected {len(all_samples)} samples for testing")
 
     # Load prompt template once
-    prompt_template = load_prompt('prompts/judge_evaluation.yml')
+    prompt_template = load_prompt('prompts/judge_evaluation_gpt.yml')
 
     # Configure rate-limited LLM
     # rate_limiter_config = {
@@ -400,15 +402,19 @@ def main():
     model_name = "gpt-5-nano"
 
     rate_config = RateLimitConfig(**rate_limiter_config)
-    llm = create_rate_limited_llm(
+    llm = create_async_rate_limited_llm(
         model_name=model_name,
         temperature=1.00,
         max_tokens=8192,
         provider="openai",
-        api_key_env="elm",
+        api_key_env="self",
         rate_limit_config=rate_config,
         parse_json=True
     )
+
+    # Create global semaphore for rate limiting like in base_pipeline.py
+    max_concurrent_requests = 480
+    global_semaphore = asyncio.Semaphore(max_concurrent_requests)
 
 
     # Batch size for processing
@@ -424,7 +430,8 @@ def main():
     print(f"Processing {len(batches)} batches with {len(batches) * batch_size} samples total")
 
     # Start overall timing
-    overall_start_time = time.time()
+    loop = asyncio.get_running_loop()
+    overall_start_time = loop.time()
 
     # Initialize results
     total_correct = 0
@@ -457,137 +464,130 @@ def main():
     all_true_labels = []
     all_predicted_labels = []
 
-    # Process batches in parallel
-    with concurrent.futures.ThreadPoolExecutor(max_workers=480) as executor:
-        # Submit all tasks
-        future_to_batch = {
-            executor.submit(process_batch, i, batch, prompt_template, llm): (i, batch)
-            for i, batch in enumerate(batches)
-        }
+    # Process batches in parallel using async - simpler approach
+    print(f"\nStarting async processing of {len(batches)} batches...")
+    
+    # Wait for all tasks to complete and collect results
+    results = await asyncio.gather(*[
+        process_batch_async(i, batch, prompt_template, llm, global_semaphore)
+        for i, batch in enumerate(batches)
+    ], return_exceptions=True)
 
-        # Process results as they complete
-        with tqdm(total=len(batches), desc="Processing batches") as pbar:
-            for future in concurrent.futures.as_completed(future_to_batch):
-                batch_id, batch = future_to_batch[future]
+    print(f"Async processing completed for {len(batches)} batches\n")
 
-                try:
-                    result = future.result()
+    # Process all results
+    for batch_id, (result, batch) in enumerate(zip(results, batches)):
+        # Handle exceptions
+        if isinstance(result, Exception):
+            api_errors += 1
+            print(f"\nUnexpected error in batch {batch_id}: {result}")
+            continue
 
-                    if result is None:
-                        # Handle case where result is None
-                        api_errors += 1
-                        print(f"\nUnexpected None result in batch {batch_id}")
-                        continue
+        if result is None:
+            # Handle case where result is None
+            api_errors += 1
+            print(f"\nUnexpected None result in batch {batch_id}")
+            continue
 
-                    if result["success"]:
-                        # Update statistics
-                        total_correct += result["correct"]
-                        total_samples += result["total"]
-                        all_incorrect.extend(result["incorrect_judgments"])
+        if result["success"]:
+            # Update statistics
+            total_correct += result["correct"]
+            total_samples += result["total"]
+            all_incorrect.extend(result["incorrect_judgments"])
 
-                        # Update label results
-                        for label, data in result["label_results"].items():
-                            label_results_aggregate[label]["total"] += data["total"]
-                            label_results_aggregate[label]["correct"] += data["correct"]
+            # Update label results
+            for label, data in result["label_results"].items():
+                label_results_aggregate[label]["total"] += data["total"]
+                label_results_aggregate[label]["correct"] += data["correct"]
 
-                        # Update token usage
-                        if "token_usage" in result:
-                            token_usage = result["token_usage"]
-                            batch_input = token_usage.get("input_tokens", 0)
-                            batch_output = token_usage.get("output_tokens", 0)
-                            batch_total = token_usage.get("total_tokens", 0)
+            # Update token usage
+            if "token_usage" in result:
+                token_usage = result["token_usage"]
+                batch_input = token_usage.get("input_tokens", 0)
+                batch_output = token_usage.get("output_tokens", 0)
+                batch_total = token_usage.get("total_tokens", 0)
 
-                            total_input_tokens += batch_input
-                            total_output_tokens += batch_output
-                            total_tokens += batch_total
+                total_input_tokens += batch_input
+                total_output_tokens += batch_output
+                total_tokens += batch_total
 
-                            # Track batch-level token usage for median calculations
-                            batch_input_tokens.append(batch_input)
-                            batch_output_tokens.append(batch_output)
-                            batch_total_tokens.append(batch_total)
+                # Track batch-level token usage for median calculations
+                batch_input_tokens.append(batch_input)
+                batch_output_tokens.append(batch_output)
+                batch_total_tokens.append(batch_total)
 
-                        # Update timing statistics
-                        if "batch_processing_time" in result:
-                            batch_time = result["batch_processing_time"]
-                            batch_processing_times.append(batch_time)
-                            total_processing_time += batch_time
+            # Update timing statistics
+            if "batch_processing_time" in result:
+                batch_time = result["batch_processing_time"]
+                batch_processing_times.append(batch_time)
+                total_processing_time += batch_time
 
-                        # Collect labels for overall metrics calculation
-                        if "precision_recall_f1" in result:
-                            # Extract true and predicted labels from the batch for aggregation
-                            for sample in batch:
-                                true_label = sample['label']
-                                if true_label == "Correct Answer":
-                                    all_true_labels.append("Correct")
-                                elif true_label == "Incorrect Answer":
-                                    all_true_labels.append("Incorrect")
-                                elif true_label == "Refusal":
-                                    all_true_labels.append("No answer")
+            # Collect labels for overall metrics calculation
+            if "precision_recall_f1" in result:
+                # Extract true and predicted labels from the batch for aggregation
+                for sample in batch:
+                    true_label = sample['label']
+                    if true_label == "Correct Answer":
+                        all_true_labels.append("Correct")
+                    elif true_label == "Incorrect Answer":
+                        all_true_labels.append("Incorrect")
+                    elif true_label == "Refusal":
+                        all_true_labels.append("No answer")
 
-                            # Get judgments from confusion matrix data for predicted labels
-                            if "confusion_matrix" in result and "matrix" in result["confusion_matrix"]:
-                                # Extract judgments from the result - we need to reconstruct them from the batch processing
-                                # This is a bit complex, but we can use the incorrect_judgments to help reconstruct
-                                batch_predicted_labels = []
-                                incorrect_judgments = result.get("incorrect_judgments", [])
+                # Get judgments from confusion matrix data for predicted labels
+                if "confusion_matrix" in result and "matrix" in result["confusion_matrix"]:
+                    # Extract judgments from the result - we need to reconstruct them from the batch processing
+                    # This is a bit complex, but we can use the incorrect_judgments to help reconstruct
+                    batch_predicted_labels = []
+                    incorrect_judgments = result.get("incorrect_judgments", [])
 
-                                # Reconstruct predicted labels for this batch
-                                for i in range(result["total"]):
-                                    # Check if this sample index appears in incorrect_judgments
-                                    found_incorrect = False
-                                    for idx, judgment, true_label, sample, judge_answer in incorrect_judgments:
-                                        if idx == i + 1:  # incorrect_judgments uses 1-based indexing
-                                            batch_predicted_labels.append(judgment)
-                                            found_incorrect = True
-                                            break
+                    # Reconstruct predicted labels for this batch
+                    for i in range(result["total"]):
+                        # Check if this sample index appears in incorrect_judgments
+                        found_incorrect = False
+                        for idx, judgment, true_label, sample, judge_answer in incorrect_judgments:
+                            if idx == i + 1:  # incorrect_judgments uses 1-based indexing
+                                batch_predicted_labels.append(judgment)
+                                found_incorrect = True
+                                break
 
-                                    if not found_incorrect:
-                                        # This was a correct judgment, so predicted = true
-                                        batch_true = batch[i]['label']
-                                        if batch_true == "Correct Answer":
-                                            batch_predicted_labels.append("Correct")
-                                        elif batch_true == "Incorrect Answer":
-                                            batch_predicted_labels.append("Incorrect")
-                                        elif batch_true == "Refusal":
-                                            batch_predicted_labels.append("No answer")
+                        if not found_incorrect:
+                            # This was a correct judgment, so predicted = true
+                            batch_true = batch[i]['label']
+                            if batch_true == "Correct Answer":
+                                batch_predicted_labels.append("Correct")
+                            elif batch_true == "Incorrect Answer":
+                                batch_predicted_labels.append("Incorrect")
+                            elif batch_true == "Refusal":
+                                batch_predicted_labels.append("No answer")
 
-                                all_predicted_labels.extend(batch_predicted_labels)
-                    else:
-                        # Check if it's a validation error or API error
-                        error_msg = result.get('error', 'Unknown error')
-                        if 'raw_response' in result and result['raw_response']:
-                            # This is a validation error - save the raw response
-                            validation_errors += 1
-                            print(f"\nValidation error in batch {batch_id}: {error_msg}")
-                            validation_error_responses.append({
-                                "batch_id": batch_id,
-                                "samples": batch,
-                                "error": error_msg,
-                                "raw_response": result['raw_response']
-                            })
-                        else:
-                            # This is an API error
-                            api_errors += 1
-                            print(f"\nAPI error in batch {batch_id}: {error_msg}")
+                    all_predicted_labels.extend(batch_predicted_labels)
+        else:
+            # Check if it's a validation error or API error
+            error_msg = result.get('error', 'Unknown error')
+            if 'raw_response' in result and result['raw_response']:
+                # This is a validation error - save the raw response
+                validation_errors += 1
+                print(f"\nValidation error in batch {batch_id}: {error_msg}")
+                validation_error_responses.append({
+                    "batch_id": batch_id,
+                    "samples": batch,
+                    "error": error_msg,
+                    "raw_response": result['raw_response']
+                })
+            else:
+                # This is an API error
+                api_errors += 1
+                print(f"\nAPI error in batch {batch_id}: {error_msg}")
 
-                        # Still collect timing information for failed batches
-                        if "batch_processing_time" in result:
-                            batch_time = result["batch_processing_time"]
-                            batch_processing_times.append(batch_time)
-                            total_processing_time += batch_time
-
-                except Exception as e:
-                    api_errors += 1
-                    print(f"\nUnexpected error in batch {batch_id}: {e}")
-
-                # Update progress
-                pbar.update(1)
-
-                # Add a small delay to avoid rate limiting
-                time.sleep(0.1)
+            # Still collect timing information for failed batches
+            if "batch_processing_time" in result:
+                batch_time = result["batch_processing_time"]
+                batch_processing_times.append(batch_time)
+                total_processing_time += batch_time
 
     # Calculate overall processing time
-    overall_end_time = time.time()
+    overall_end_time = loop.time()
     overall_processing_time = overall_end_time - overall_start_time
 
     # Calculate overall precision, recall, F1, and confusion matrix if we have data
@@ -795,6 +795,10 @@ def main():
         json.dump(results_summary, f, indent=2, ensure_ascii=False)
 
     print(f"Results summary saved to {results_summary_file}")
+
+def main():
+    """Sync wrapper for async main function"""
+    asyncio.run(main_async())
 
 if __name__ == "__main__":
     main()

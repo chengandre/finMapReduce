@@ -1,4 +1,3 @@
-import os
 import time
 import tiktoken
 import subprocess
@@ -8,19 +7,13 @@ import hashlib
 import yaml
 
 from pathlib import Path
-from dotenv import load_dotenv
 from langchain.schema import Document
 from langchain.text_splitter import CharacterTextSplitter, RecursiveCharacterTextSplitter
 from langchain_community.document_loaders import PyPDFLoader, PDFMinerLoader, PyMuPDFLoader, UnstructuredPDFLoader
 from langchain.prompts import load_prompt
-from typing import Optional, Dict, Any
-
-load_dotenv()
 
 # Suppress langchain text splitter warnings
 logging.getLogger("langchain_text_splitters.base").setLevel(logging.ERROR)
-
-
 
 
 def num_tokens_from_string(string: str, encoding_name: str) -> int:

@@ -11,6 +11,10 @@ from dataclasses import dataclass
 from pathlib import Path
 from pydantic import SecretStr
 from langchain_openai import ChatOpenAI
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 
 # ============================================================================
@@ -75,7 +79,13 @@ class LLMProviderFactory:
                 None: "OPENAI_API_KEY"
             }
             env_var = key_mapping.get(config.api_key_env, "SELF_OPENAI_API_KEY")
-            api_key = SecretStr(os.getenv(env_var, ""))
+            api_key_value = os.getenv(env_var, "")
+            if not api_key_value:
+                available_keys = [k for k in os.environ.keys() if 'OPENAI' in k]
+                raise ValueError(f"API key not found in environment variable {env_var}. "
+                               f"Available OPENAI env vars: {available_keys}. "
+                               f"Please set {env_var} or check your environment setup.")
+            api_key = SecretStr(api_key_value)
             base_url = config.base_url
 
         return api_key, base_url
