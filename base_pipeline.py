@@ -52,11 +52,17 @@ class BasePipeline(ABC):
         self.pdf_parser = pdf_parser
         self.max_total_requests = max_total_requests
         self.global_semaphore = asyncio.Semaphore(max_total_requests)
-        self.judge_evaluator = AsyncLLMJudgeEvaluator(
-            llm=self.judge_llm,
-            prompts_dict=prompts_dict,
-            formatter_type=self.get_evaluation_formatter_type()
-        )
+
+        self.judge_evaluator = None
+
+    def _initialize_evaluator(self):
+        """Initialize the judge evaluator after subclass components are ready."""
+        if self.judge_evaluator is None:
+            self.judge_evaluator = AsyncLLMJudgeEvaluator(
+                llm=self.judge_llm,
+                prompts_dict=self.prompts_dict,
+                formatter_type=self.get_evaluation_formatter_type()
+            )
 
     # ===== Abstract Methods - Must be implemented by subclasses =====
 

@@ -262,7 +262,7 @@ class AsyncLLMJudgeEvaluator:
         self.judge_prompt = prompts_dict['judge_prompt']
         self.batch_size = batch_size
         self.formatter_type = formatter_type
-        
+
         # Create formatter instance during initialization if type is specified
         if formatter_type:
             self.formatter = EvaluationFormatterFactory.create_formatter(

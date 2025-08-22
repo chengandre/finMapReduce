@@ -60,6 +60,9 @@ class MapReducePipeline(BasePipeline):
 
         self.format_type = format_type
 
+        # Initialize evaluator now that all components are ready
+        self._initialize_evaluator()
+
     def _create_formatter(self,
                          format_type: str,
                          prompts_dict: Dict[str, Any],

@@ -43,6 +43,9 @@ class TruncationPipeline(BasePipeline):
         # Set LLM instance for the formatter
         self.truncation_formatter.set_llm(self.llm)
 
+        # Initialize evaluator now that all components are ready
+        self._initialize_evaluator()
+
     # ===== Pipeline Implementation (Abstract Methods) =====
 
     async def process_single_qa_async(self, qa_pair: Dict[str, Any], document_cache: Optional[Dict[str, Tuple[str, int]]] = None) -> Dict[str, Any]:
