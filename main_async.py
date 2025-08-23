@@ -83,9 +83,9 @@ async def main_async():
     # Auto-detect data path if not provided
     if args.data_path is None:
         if args.dataset == 'financebench':
-            data_path = '../financebench/data/financebench_open_source.jsonl'
+            data_path = 'financebench/financebench_open_source.jsonl'
         else:
-            data_path = '../finqa_balanced_subset.json'
+            data_path = 'finqa/finqa_test.json'
     else:
         data_path = args.data_path
 
