@@ -1,5 +1,13 @@
 /* Custom styles for the MapReduce QA WebApp */
 
+/* Disable page-level scrolling and ensure full height layout */
+html, body {
+    height: 100%;
+    overflow: hidden;
+    margin: 0;
+    padding: 0;
+}
+
 /* Smooth transitions for all interactive elements */
 * {
     transition: all 0.2s ease-in-out;
@@ -112,6 +120,29 @@
     animation: slideIn 0.3s ease-out;
 }
 
+.result-content {
+    background: white;
+    border: 1px solid #e5e7eb;
+    border-radius: 0.5rem;
+    padding: 1rem;
+    margin-bottom: 1rem;
+}
+
+.result-content h3 {
+    font-size: 1rem;
+    font-weight: 600;
+    color: #374151;
+    margin-bottom: 0.5rem;
+    display: flex;
+    align-items: center;
+}
+
+.result-content h3 svg {
+    width: 1rem;
+    height: 1rem;
+    margin-right: 0.5rem;
+}
+
 @keyframes slideIn {
     from {
         opacity: 0;
@@ -123,6 +154,48 @@
     }
 }
 
+/* Three panel layout styles */
+.three-panel-layout {
+    display: flex;
+    height: calc(100vh - 96px);
+}
+
+.panel {
+    overflow-y: auto;
+    border-right: 1px solid #e5e7eb;
+}
+
+.panel:last-child {
+    border-right: none;
+}
+
+/* Document preview specific styles */
+#documentPreview {
+    font-family: 'SF Mono', Monaco, 'Cascadia Code', 'Roboto Mono', Consolas, 'Courier New', monospace;
+    font-size: 0.875rem;
+    line-height: 1.5;
+    background: #f9fafb;
+    border: 1px solid #e5e7eb;
+    border-radius: 0.5rem;
+    padding: 1rem;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+}
+
+#documentPreview.has-content {
+    background: white;
+    max-height: calc(100vh - 200px);
+}
+
+.document-info {
+    background: #f3f4f6;
+    border: 1px solid #d1d5db;
+    border-radius: 0.375rem;
+    padding: 0.75rem;
+    margin-bottom: 1rem;
+    font-size: 0.875rem;
+}
+
 /* Stats grid responsive improvements */
 @media (max-width: 768px) {
     #statsContent {
@@ -132,6 +205,119 @@
     .container {
         padding-left: 1rem;
         padding-right: 1rem;
+    }
+    
+    /* Mobile responsive: stack panels vertically */
+    .three-panel-layout {
+        flex-direction: column;
+        height: auto;
+    }
+    
+    .panel {
+        width: 100% !important;
+        border-right: none;
+        border-bottom: 1px solid #e5e7eb;
+        min-height: 300px;
+    }
+    
+    .panel:last-child {
+        border-bottom: none;
+    }
+}
+
+/* Three-panel layout with consistent design */
+.three-panel-layout {
+    display: flex;
+    height: calc(100vh - 96px);
+    overflow: hidden;
+}
+
+.panel {
+    flex: 1;
+    background: white;
+    border-right: 1px solid #e5e7eb;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.panel:last-child {
+    border-right: none;
+}
+
+.panel-header {
+    padding: 16px 24px;
+    border-bottom: 1px solid #e5e7eb;
+    background: #f9fafb;
+    flex-shrink: 0;
+}
+
+.panel-header h2 {
+    font-size: 1.25rem;
+    font-weight: 600;
+    color: #111827;
+    margin: 0 0 4px 0;
+}
+
+.panel-header p {
+    font-size: 0.875rem;
+    color: #6b7280;
+    margin: 4px 0 0 0;
+}
+
+.panel-content {
+    flex: 1;
+    padding: 24px;
+    overflow-y: auto;
+    overflow-x: hidden;
+}
+
+/* Statistics grid layout */
+.stats-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 12px;
+    margin-top: 8px;
+}
+
+.stat-item {
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 6px;
+    padding: 8px 12px;
+}
+
+.stat-label {
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: #64748b;
+    margin-bottom: 2px;
+}
+
+.stat-value {
+    font-size: 0.875rem;
+    color: #1e293b;
+    font-family: ui-monospace, SFMono-Regular, "SF Mono", Consolas, "Liberation Mono", Menlo, monospace;
+}
+
+@media (max-width: 640px) {
+    .stats-grid {
+        grid-template-columns: 1fr;
+    }
+    
+    .three-panel-layout {
+        flex-direction: column;
+        height: auto;
+    }
+    
+    .panel {
+        border-right: none;
+        border-bottom: 1px solid #e5e7eb;
+        min-height: 300px;
+    }
+    
+    .panel:last-child {
+        border-bottom: none;
     }
 }
 

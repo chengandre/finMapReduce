@@ -21,12 +21,14 @@ class PipelineFactory:
     _dataset_registry: Dict[str, Type[DatasetLoader]] = {
         'financebench': FinanceBenchLoader,
         'finqa': FinQALoader,
+        'webapp': None,  # Will be handled by direct loader instance
     }
 
     @classmethod
     def create_pipeline(cls,
                        dataset: str,
                        format_type: str = "json",
+                       dataset_loader: Optional[DatasetLoader] = None,
                        **config) -> BasePipeline:
         """
         Create a configured pipeline instance with internally created loader.
@@ -71,8 +73,9 @@ class PipelineFactory:
         if 'prompts_dict' not in config:
             raise ValueError(f"{dataset} requires 'prompts_dict' parameter")
 
-        # Create dataset loader with dataset-specific parameters
-        dataset_loader = cls._create_dataset_loader(dataset, config)
+        # Create dataset loader with dataset-specific parameters (if not provided)
+        if dataset_loader is None:
+            dataset_loader = cls._create_dataset_loader(dataset, config)
 
         # Extract loader-specific parameters from config before passing to pipeline
         cleaned_config = cls._clean_config_for_pipeline(dataset, config)
@@ -90,6 +93,7 @@ class PipelineFactory:
                                   context_window: int = 128000,
                                   buffer: int = 2000,
                                   max_document_tokens: Optional[int] = None,
+                                  dataset_loader: Optional[DatasetLoader] = None,
                                   **config) -> TruncationPipeline:
         """
         Create a configured truncation pipeline instance.
@@ -135,8 +139,9 @@ class PipelineFactory:
         if dataset == 'finqa' and 'doc_dir' not in config:
             raise ValueError("FinQA truncation pipeline requires 'doc_dir' parameter")
 
-        # Create dataset loader with dataset-specific parameters
-        dataset_loader = cls._create_dataset_loader(dataset, config)
+        # Create dataset loader with dataset-specific parameters (if not provided)
+        if dataset_loader is None:
+            dataset_loader = cls._create_dataset_loader(dataset, config)
 
         # Create truncation formatter
         truncation_formatter = TruncationFormatter(
@@ -159,7 +164,13 @@ class PipelineFactory:
     @classmethod
     def _create_dataset_loader(cls, dataset: str, config: Dict[str, Any]) -> DatasetLoader:
         """Create dataset loader with dataset-specific parameters."""
+        if dataset == 'webapp':
+            # Webapp should be handled by direct loader instance, not created here
+            raise ValueError("Webapp dataset loader should be provided directly, not created by factory")
+            
         loader_class = cls._dataset_registry[dataset]
+        if loader_class is None:
+            raise ValueError(f"No loader class registered for dataset '{dataset}'")
 
         if dataset == 'financebench':
             # FinanceBench loader needs pdf_parser

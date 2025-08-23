@@ -42,19 +42,35 @@ if os.path.exists(static_dir):
 
 @app.get("/")
 async def serve_frontend():
-    """Serve the main frontend page."""
+    """Serve the enhanced frontend page."""
+    frontend_path = os.path.join(os.path.dirname(__file__), "../frontend/index_enhanced.html")
+    if os.path.exists(frontend_path):
+        return FileResponse(frontend_path)
+    else:
+        # Fallback to original frontend
+        fallback_path = os.path.join(os.path.dirname(__file__), "../frontend/index.html")
+        if os.path.exists(fallback_path):
+            return FileResponse(fallback_path)
+        else:
+            raise HTTPException(status_code=404, detail="Frontend not found")
+
+
+@app.get("/simple")
+async def serve_simple_frontend():
+    """Serve the original simple frontend page."""
     frontend_path = os.path.join(os.path.dirname(__file__), "../frontend/index.html")
     if os.path.exists(frontend_path):
         return FileResponse(frontend_path)
     else:
-        raise HTTPException(status_code=404, detail="Frontend not found")
+        raise HTTPException(status_code=404, detail="Simple frontend not found")
 
 
 @app.get("/favicon.ico")
 async def favicon():
     """Serve favicon."""
-    return FileResponse(os.path.join(os.path.dirname(__file__), "../frontend/static/favicon.ico"),
-                       status_code=404)  # Return 404 if no favicon exists
+    from fastapi import Response
+    # Return empty response instead of trying to serve non-existent file
+    return Response(status_code=204)
 
 
 if __name__ == "__main__":
