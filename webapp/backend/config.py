@@ -2,8 +2,13 @@ import os
 from typing import Optional
 from dotenv import load_dotenv
 
-# Load environment variables from .env file
-load_dotenv()
+# Load environment variables from .env file in parent directory
+env_path = os.path.join(os.path.dirname(__file__), '../../.env')
+loaded = load_dotenv(env_path)
+print(f"Loading .env from: {env_path}")
+print(f".env loaded successfully: {loaded}")
+print(f"OPENAI_API_KEY: {'set' if os.getenv('OPENAI_API_KEY') else 'not set'}")
+print(f"OPENROUTER_API_KEY: {'set' if os.getenv('OPENROUTER_API_KEY') else 'not set'}")
 
 
 class Settings:
@@ -16,8 +21,8 @@ class Settings:
         self.self_openai_api_key = os.getenv("SELF_OPENAI_API_KEY")
 
         # Default LLM Settings
-        self.default_model = os.getenv("DEFAULT_MODEL", "gpt-4o-mini")
-        self.default_provider = os.getenv("DEFAULT_PROVIDER", "openai")
+        self.default_model = os.getenv("DEFAULT_MODEL", "deepseek/deepseek-r1-0528:free")
+        self.default_provider = os.getenv("DEFAULT_PROVIDER", "openrouter")
         self.default_temperature = float(os.getenv("DEFAULT_TEMPERATURE", "0.0"))
         self.default_chunk_size = int(os.getenv("DEFAULT_CHUNK_SIZE", "36000"))
         self.default_chunk_overlap = int(os.getenv("DEFAULT_CHUNK_OVERLAP", "1000"))
