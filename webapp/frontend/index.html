@@ -3,257 +3,382 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>MapReduce Document QA</title>
+    <title>MapReduce-Based QA System</title>
     <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
     <link rel="stylesheet" href="/static/style.css">
+    <style>
+        .markdown-content {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        }
+        .markdown-content h1 { @apply text-2xl font-bold mt-6 mb-4; }
+        .markdown-content h2 { @apply text-xl font-bold mt-5 mb-3; }
+        .markdown-content h3 { @apply text-lg font-bold mt-4 mb-2; }
+        .markdown-content p { @apply mb-3 leading-relaxed; }
+        .markdown-content ul { @apply list-disc ml-6 mb-3; }
+        .markdown-content ol { @apply list-decimal ml-6 mb-3; }
+        .markdown-content li { @apply mb-1; }
+        .markdown-content blockquote { @apply border-l-4 border-gray-300 pl-4 italic mb-3; }
+        .markdown-content code { @apply bg-gray-100 px-1 rounded text-sm font-mono; }
+        .markdown-content pre { @apply bg-gray-100 p-3 rounded overflow-x-auto mb-3; }
+        .markdown-content strong { @apply font-semibold; }
+        .markdown-content em { @apply italic; }
+        .markdown-content table { @apply border-collapse border border-gray-300 mb-3; }
+        .markdown-content th, .markdown-content td { @apply border border-gray-300 px-3 py-2; }
+        .markdown-content th { @apply bg-gray-50 font-semibold; }
+    </style>
 </head>
 <body class="bg-gray-50 min-h-screen">
     <!-- Header -->
     <header class="bg-white shadow-sm border-b">
         <div class="container mx-auto px-4 py-4">
-            <h1 class="text-2xl font-bold text-gray-900">Document QA System</h1>
-            <p class="text-sm text-gray-600">Upload a document and ask questions using MapReduce processing</p>
+            <h1 class="text-3xl font-bold text-gray-900">MapReduce-Based QA System</h1>
+            <p class="text-gray-600 mt-1">Upload documents and ask questions using MapReduce or Truncation pipelines</p>
         </div>
     </header>
 
-    <!-- Three Panel Layout -->
-    <div class="flex h-screen" style="height: calc(100vh - 96px);">
-        <!-- Panel 1: Upload Form & Options -->
-        <div class="w-1/3 border-r border-gray-200 bg-white overflow-y-auto">
-            <div class="p-6">
-            <form id="qaForm" enctype="multipart/form-data" class="space-y-6">
-                <!-- File Upload -->
-                <div>
-                    <label for="file" class="block text-sm font-medium text-gray-700 mb-2">
-                        Upload Document (PDF, TXT, MD)
-                    </label>
-                    <div id="dropZone" class="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center hover:border-gray-400 transition-colors cursor-pointer">
-                        <div id="dropText" class="text-gray-500">
-                            <svg class="mx-auto h-12 w-12 text-gray-400 mb-4" stroke="currentColor" fill="none" viewBox="0 0 48 48">
-                                <path d="M28 8H12a4 4 0 00-4 4v20m32-12v8m0 0v8a4 4 0 01-4 4H12a4 4 0 01-4-4v-4m32-4l-3.172-3.172a4 4 0 00-5.656 0L28 28M8 32l9.172-9.172a4 4 0 015.656 0L28 28m0 0l4 4m4-24h8m-4-4v8m-12 4h.02" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
-                            </svg>
-                            <p>Drag and drop your file here, or <span class="text-blue-600 underline">click to browse</span></p>
-                            <p class="text-sm text-gray-400 mt-2">Max size: 50MB</p>
+    <div class="three-panel-layout">
+        <!-- Panel 1: Input Form -->
+        <div class="panel">
+            <div class="panel-header">
+                <h2>Document Upload & Configuration</h2>
+                <p>Upload documents and configure processing settings</p>
+            </div>
+            <div class="panel-content">
+                
+                <form id="qaForm" enctype="multipart/form-data" class="space-y-6">
+                    <!-- File Upload -->
+                    <div>
+                        <label for="file" class="block text-sm font-medium text-gray-700 mb-2">
+                            Upload Document (PDF, TXT, MD)
+                        </label>
+                        <div id="dropZone" class="border-2 border-dashed border-gray-300 rounded-lg p-4 text-center hover:border-gray-400 transition-colors cursor-pointer">
+                            <div id="dropText" class="text-gray-500">
+                                <svg class="mx-auto h-8 w-8 text-gray-400 mb-2" stroke="currentColor" fill="none" viewBox="0 0 48 48">
+                                    <path d="M28 8H12a4 4 0 00-4 4v20m32-12v8m0 0v8a4 4 0 01-4 4H12a4 4 0 01-4-4v-4m32-4l-3.172-3.172a4 4 0 00-5.656 0L28 28M8 32l9.172-9.172a4 4 0 015.656 0L28 28m0 0l4 4m4-24h8m-4-4v8m-12 4h.02" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                                </svg>
+                                <p class="text-sm">Drag & drop or <span class="text-blue-600 underline">browse</span></p>
+                                <p class="text-xs text-gray-400 mt-1">Max size: 50MB</p>
+                            </div>
+                            <div id="fileInfo" class="hidden text-green-600">
+                                <svg class="mx-auto h-6 w-6 mb-2" fill="currentColor" viewBox="0 0 20 20">
+                                    <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/>
+                                </svg>
+                                <p id="fileName" class="text-sm font-medium"></p>
+                                <p id="fileStats" class="text-xs text-gray-500 mt-1"></p>
+                                <button type="button" id="previewBtn" class="text-xs text-blue-600 hover:text-blue-800 mt-2">
+                                    Show document preview
+                                </button>
+                            </div>
                         </div>
-                        <div id="fileInfo" class="hidden text-green-600">
-                            <svg class="mx-auto h-8 w-8 mb-2" fill="currentColor" viewBox="0 0 20 20">
-                                <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/>
-                            </svg>
-                            <p id="fileName"></p>
+                        <input type="file" id="file" name="file" accept=".pdf,.txt,.md" class="hidden" required>
+                    </div>
+
+                    <!-- Question Input -->
+                    <div>
+                        <label for="question" class="block text-sm font-medium text-gray-700 mb-2">
+                            Your Question
+                        </label>
+                        <textarea 
+                            id="question" 
+                            name="question" 
+                            rows="3" 
+                            class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 text-sm"
+                            placeholder="What would you like to know about this document?"
+                            required
+                        ></textarea>
+                        <div class="mt-2">
+                            <button type="button" id="exampleBtn" class="text-sm text-blue-600 hover:text-blue-800">
+                                Use example question
+                            </button>
                         </div>
                     </div>
-                    <input type="file" id="file" name="file" accept=".pdf,.txt,.md" class="hidden" required>
-                </div>
 
-                <!-- Question Input -->
-                <div>
-                    <label for="question" class="block text-sm font-medium text-gray-700 mb-2">
-                        Your Question
-                    </label>
-                    <textarea 
-                        id="question" 
-                        name="question" 
-                        rows="3" 
-                        class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500"
-                        placeholder="What would you like to know about this document?"
-                        required
-                    ></textarea>
-                    <div class="mt-2">
-                        <button type="button" id="exampleBtn" class="text-sm text-blue-600 hover:text-blue-800">
-                            Use example question
-                        </button>
+                    <!-- Pipeline Configuration -->
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div>
+                            <label for="pipeline_type" class="block text-sm font-medium text-gray-700 mb-1">Pipeline Type</label>
+                            <select id="pipeline_type" name="pipeline_type" class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500">
+                                <option value="mapreduce">MapReduce (Parallel Processing)</option>
+                                <option value="truncation">Truncation (Single Pass)</option>
+                            </select>
+                        </div>
+                        
+                        <div id="format_type_container">
+                            <label for="format_type" class="block text-sm font-medium text-gray-700 mb-1">Format Type</label>
+                            <select id="format_type" name="format_type" class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500">
+                                <option value="hybrid">Hybrid (Recommended)</option>
+                                <option value="json">JSON (Structured)</option>
+                                <option value="plain_text">Plain Text</option>
+                            </select>
+                        </div>
+                        
+                        <div id="strategy_container" class="hidden">
+                            <label for="strategy" class="block text-sm font-medium text-gray-700 mb-1">Truncation Strategy</label>
+                            <select id="strategy" name="strategy" class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500">
+                                <option value="start">Start (Keep Beginning)</option>
+                                <option value="end">End (Keep Ending)</option>
+                                <option value="smart">Smart (Intelligent)</option>
+                            </select>
+                        </div>
                     </div>
-                </div>
 
-                <!-- Advanced Options (Collapsible) -->
-                <div>
-                    <button type="button" id="advancedToggle" class="flex items-center text-sm font-medium text-gray-700 hover:text-gray-900">
-                        <svg id="chevron" class="w-4 h-4 mr-1 transform transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
-                        </svg>
-                        Advanced Options
-                    </button>
-                    
-                    <div id="advancedOptions" class="hidden mt-4 grid grid-cols-1 md:grid-cols-2 gap-4 p-4 bg-gray-50 rounded-lg">
+                    <!-- Model Configuration -->
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div>
                             <label for="model_name" class="block text-sm font-medium text-gray-700 mb-1">Model</label>
-                            <input type="text" id="model_name" name="model_name" value="gpt-4o-mini" class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500" placeholder="Enter model name">
+                            <input type="text" id="model_name" name="model_name" value="gpt-4o-mini" class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500" placeholder="Enter model name">
                         </div>
                         
                         <div>
                             <label for="provider" class="block text-sm font-medium text-gray-700 mb-1">Provider</label>
-                            <select id="provider" name="provider" class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500">
+                            <select id="provider" name="provider" class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500">
                                 <option value="openai">OpenAI</option>
                                 <option value="openrouter">OpenRouter</option>
                             </select>
                         </div>
+                    </div>
+
+                    <!-- Advanced Options -->
+                    <div>
+                        <button type="button" id="advancedToggle" class="flex items-center text-sm font-medium text-gray-700 hover:text-gray-900 mb-3">
+                            <svg id="chevron" class="w-4 h-4 mr-1 transform transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"></path>
+                            </svg>
+                            Advanced Options
+                        </button>
                         
-                        <div>
-                            <label for="format_type" class="block text-sm font-medium text-gray-700 mb-1">Output Format</label>
-                            <select id="format_type" name="format_type" class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500">
-                                <option value="json">JSON (Structured)</option>
-                                <option value="hybrid">Hybrid (Text + JSON)</option>
-                                <option value="plain">Plain Text</option>
-                            </select>
-                        </div>
-                        
-                        <div>
-                            <label for="pdf_parser" class="block text-sm font-medium text-gray-700 mb-1">PDF Parser</label>
-                            <select id="pdf_parser" name="pdf_parser" class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500">
-                                <option value="marker">Marker (Best)</option>
-                                <option value="pypdf">PyPDF (Fast)</option>
-                                <option value="pdfminer">PDFMiner (Fallback)</option>
-                            </select>
-                        </div>
-                        
-                        <div>
-                            <label for="temperature" class="block text-sm font-medium text-gray-700 mb-1">Temperature</label>
-                            <input type="number" id="temperature" name="temperature" value="0.0" min="0" max="2" step="0.1" class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500">
-                        </div>
-                        
-                        <div>
-                            <label for="chunk_size" class="block text-sm font-medium text-gray-700 mb-1">Chunk Size</label>
-                            <input type="number" id="chunk_size" name="chunk_size" value="32768" min="1000" max="100000" step="1000" class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500">
-                        </div>
-                        
-                        <div>
-                            <label for="chunk_overlap" class="block text-sm font-medium text-gray-700 mb-1">Chunk Overlap</label>
-                            <input type="number" id="chunk_overlap" name="chunk_overlap" value="4096" min="0" max="10000" step="100" class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500">
-                        </div>
-                        
-                        <div>
-                            <label for="prompt_set" class="block text-sm font-medium text-gray-700 mb-1">Prompt Set</label>
-                            <select id="prompt_set" name="prompt_set" class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500">
-                                <option value="default">Default</option>
-                                <option value="baseline">Baseline</option>
-                                <option value="standard">Standard</option>
-                                <option value="hybrid">Hybrid</option>
-                                <option value="direct">Direct</option>
-                                <option value="finqa">FinQA</option>
-                            </select>
+                        <div id="advancedOptions" class="hidden space-y-4 p-4 bg-gray-50 rounded-lg">
+                            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div>
+                                    <label for="prompt_set" class="block text-sm font-medium text-gray-700 mb-1">Prompt Set</label>
+                                    <select id="prompt_set" name="prompt_set" class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500">
+                                        <option value="default">Default</option>
+                                        <option value="baseline">Baseline</option>
+                                        <option value="standard">Standard</option>
+                                        <option value="hybrid">Hybrid</option>
+                                        <option value="direct">Direct</option>
+                                        <option value="finqa">FinQA</option>
+                                    </select>
+                                </div>
+                                
+                                <div>
+                                    <label for="pdf_parser" class="block text-sm font-medium text-gray-700 mb-1">PDF Parser</label>
+                                    <select id="pdf_parser" name="pdf_parser" class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500">
+                                        <option value="marker">Marker (Best Quality)</option>
+                                        <option value="pypdf">PyPDF (Fast)</option>
+                                        <option value="pdfminer">PDFMiner (Fallback)</option>
+                                    </select>
+                                </div>
+                                
+                                <div>
+                                    <label for="temperature" class="block text-sm font-medium text-gray-700 mb-1">Temperature</label>
+                                    <input type="number" id="temperature" name="temperature" value="0.0" min="0" max="2" step="0.1" class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500">
+                                </div>
+                                
+                                <div>
+                                    <label for="score_threshold" class="block text-sm font-medium text-gray-700 mb-1">Score Threshold</label>
+                                    <input type="number" id="score_threshold" name="score_threshold" value="5" min="1" max="100" step="1" class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500">
+                                </div>
+                                
+                                <div>
+                                    <label for="chunk_size" class="block text-sm font-medium text-gray-700 mb-1">Chunk Size</label>
+                                    <input type="number" id="chunk_size" name="chunk_size" value="32768" min="1000" max="100000" step="1" class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500">
+                                </div>
+                                
+                                <div>
+                                    <label for="chunk_overlap" class="block text-sm font-medium text-gray-700 mb-1">Chunk Overlap</label>
+                                    <input type="number" id="chunk_overlap" name="chunk_overlap" value="4096" min="0" max="10000" step="1" class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500">
+                                </div>
+                            </div>
+                            
+                            <!-- Truncation-specific options -->
+                            <div id="truncationOptions" class="hidden grid grid-cols-1 md:grid-cols-2 gap-4">
+                                <div>
+                                    <label for="context_window" class="block text-sm font-medium text-gray-700 mb-1">Context Window</label>
+                                    <input type="number" id="context_window" name="context_window" value="128000" min="1000" max="200000" step="1000" class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500">
+                                </div>
+                                
+                                <div>
+                                    <label for="buffer" class="block text-sm font-medium text-gray-700 mb-1">Response Buffer</label>
+                                    <input type="number" id="buffer" name="buffer" value="2000" min="500" max="10000" step="100" class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500">
+                                </div>
+                            </div>
                         </div>
                     </div>
-                </div>
 
-                <!-- Submit Button -->
-                <div class="pt-4">
-                    <button 
-                        type="submit" 
-                        id="submitBtn"
-                        class="w-full bg-blue-600 text-white py-3 px-4 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-colors font-medium"
-                    >
-                        <span id="submitText">Analyze Document</span>
-                        <div id="loadingSpinner" class="hidden inline-block ml-2">
-                            <svg class="animate-spin h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                            </svg>
-                        </div>
-                    </button>
-                </div>
-            </form>
+                    <!-- Submit Button -->
+                    <div class="pt-4">
+                        <button 
+                            type="submit" 
+                            id="submitBtn"
+                            class="w-full bg-blue-600 text-white py-3 px-4 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-colors font-medium"
+                        >
+                            <span id="submitText">Analyze Document</span>
+                            <div id="loadingSpinner" class="hidden inline-block ml-2">
+                                <svg class="animate-spin h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                                    <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                    <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                                </svg>
+                            </div>
+                        </button>
+                    </div>
+                </form>
             </div>
         </div>
 
         <!-- Panel 2: Document Preview -->
-        <div class="w-1/3 border-r border-gray-200 bg-white overflow-y-auto">
-            <div class="p-6">
-                <h2 class="text-lg font-semibold text-gray-900 mb-4">Document Preview</h2>
-                <div id="documentPreview" class="h-full">
-                    <div class="flex items-center justify-center h-64 text-gray-400">
-                        <div class="text-center">
-                            <svg class="mx-auto h-12 w-12 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
-                            </svg>
-                            <p>No document loaded</p>
+        <div class="panel">
+            <div class="panel-header">
+                <h2>Document Preview</h2>
+                <p>Document content will appear here after upload</p>
+            </div>
+            <div class="panel-content" id="documentPreviewPanel">
+                <!-- Default Preview Message -->
+                <div id="defaultPreviewMessage" class="text-center text-gray-400 py-12">
+                    <svg class="mx-auto h-16 w-16 text-gray-300 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+                    </svg>
+                    <h3 class="text-lg font-medium text-gray-500 mb-2">No Document Loaded</h3>
+                    <p class="text-gray-400">Upload a document to see its preview here</p>
+                </div>
+                
+                <!-- Actual Document Preview -->
+                <div id="actualDocumentPreview" class="hidden">
+                    <!-- Document Info -->
+                    <div id="docInfoPreview" class="bg-blue-50 p-3 rounded-lg border border-blue-200 mb-4">
+                        <div class="grid grid-cols-2 gap-4 text-sm">
+                            <div>
+                                <span class="font-medium text-blue-800">File:</span>
+                                <span id="previewFileName" class="text-blue-700 ml-1">-</span>
+                            </div>
+                            <div>
+                                <span class="font-medium text-blue-800">Size:</span>
+                                <span id="previewFileSize" class="text-blue-700 ml-1">-</span>
+                            </div>
+                            <div>
+                                <span class="font-medium text-blue-800">Type:</span>
+                                <span id="previewFileType" class="text-blue-700 ml-1">-</span>
+                            </div>
+                            <div>
+                                <span class="font-medium text-blue-800">Modified:</span>
+                                <span id="previewFileModified" class="text-blue-700 ml-1">-</span>
+                            </div>
                         </div>
+                    </div>
+                    
+                    <!-- Document Content -->
+                    <div class="bg-gray-50 p-4 rounded-lg border border-gray-200 overflow-y-auto" style="max-height: calc(100vh - 350px);">
+                        <div id="previewLoadingSpinner" class="hidden text-center text-gray-500 py-8">
+                            <svg class="animate-spin h-6 w-6 mx-auto mb-2" fill="none" viewBox="0 0 24 24">
+                                <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                                <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                            </svg>
+                            <p>Loading preview...</p>
+                        </div>
+                        <div id="previewContent" class="whitespace-pre-wrap text-sm text-gray-700 leading-relaxed font-mono"></div>
                     </div>
                 </div>
             </div>
         </div>
 
         <!-- Panel 3: Results Display -->
-        <div class="w-1/3 bg-white overflow-y-auto">
-            <div class="p-6">
-                <h2 class="text-lg font-semibold text-gray-900 mb-4">Analysis Results</h2>
-                <div id="results" class="h-full">
-            <!-- Error Display -->
-            <div id="errorDisplay" class="hidden bg-red-50 border border-red-200 rounded-md p-4 mb-6">
-                <div class="flex">
-                    <div class="flex-shrink-0">
-                        <svg class="h-5 w-5 text-red-400" viewBox="0 0 20 20" fill="currentColor">
-                            <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd"/>
-                        </svg>
-                    </div>
-                    <div class="ml-3">
-                        <h3 class="text-sm font-medium text-red-800">Error</h3>
-                        <div class="mt-2 text-sm text-red-700">
-                            <p id="errorMessage"></p>
-                        </div>
-                    </div>
-                </div>
+        <div class="panel">
+            <div class="panel-header" id="resultsHeader">
+                <h2>Analysis Results</h2>
+                <p>Upload a document and ask a question to see results here</p>
             </div>
-
-            <!-- Success Results -->
-            <div id="successResults" class="hidden space-y-6">
-                <!-- Answer Panel -->
-                <div class="bg-white rounded-lg shadow-md p-6">
-                    <h2 class="text-xl font-semibold text-gray-900 mb-4 flex items-center">
-                        <svg class="w-5 h-5 mr-2 text-green-600" fill="currentColor" viewBox="0 0 20 20">
-                            <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/>
+            <div class="panel-content" id="resultsContent">
+                    <!-- Welcome Message -->
+                    <div id="welcomeMessage" class="text-center text-gray-500 py-12">
+                        <svg class="mx-auto h-16 w-16 text-gray-300 mb-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
                         </svg>
-                        Answer
-                    </h2>
-                    <div id="answerContent" class="prose max-w-none text-gray-700"></div>
-                </div>
+                        <h3 class="text-lg font-medium text-gray-900 mb-2">Ready to Analyze</h3>
+                        <p class="text-gray-600">Results will appear here after analysis</p>
+                    </div>
 
-                <!-- Reasoning Panel -->
-                <div class="bg-white rounded-lg shadow-md p-6">
-                    <h2 class="text-xl font-semibold text-gray-900 mb-4 flex items-center">
-                        <svg class="w-5 h-5 mr-2 text-blue-600" fill="currentColor" viewBox="0 0 20 20">
-                            <path fill-rule="evenodd" d="M11.49 3.17c-.38-1.56-2.6-1.56-2.98 0a1.532 1.532 0 01-2.286.948c-1.372-.836-2.942.734-2.106 2.106.54.886.061 2.042-.947 2.287-1.561.379-1.561 2.6 0 2.978a1.532 1.532 0 01.947 2.287c-.836 1.372.734 2.942 2.106 2.106a1.532 1.532 0 012.287.947c.379 1.561 2.6 1.561 2.978 0a1.533 1.533 0 012.287-.947c1.372.836 2.942-.734 2.106-2.106a1.533 1.533 0 01.947-2.287c1.561-.379 1.561-2.6 0-2.978a1.532 1.532 0 01-.947-2.287c.836-1.372-.734-2.942-2.106-2.106a1.532 1.532 0 01-2.287-.947zM10 13a3 3 0 100-6 3 3 0 000 6z" clip-rule="evenodd"/>
-                        </svg>
-                        Reasoning
-                    </h2>
-                    <div id="reasoningContent" class="prose max-w-none text-gray-700"></div>
-                </div>
-
-                <!-- Evidence Panel -->
-                <div class="bg-white rounded-lg shadow-md p-6">
-                    <h2 class="text-xl font-semibold text-gray-900 mb-4 flex items-center">
-                        <svg class="w-5 h-5 mr-2 text-yellow-600" fill="currentColor" viewBox="0 0 20 20">
-                            <path fill-rule="evenodd" d="M3 4a1 1 0 011-1h12a1 1 0 011 1v2a1 1 0 01-1 1H4a1 1 0 01-1-1V4zm0 4a1 1 0 011-1h6a1 1 0 011 1v6a1 1 0 01-1 1H4a1 1 0 01-1-1V8zm8 0a1 1 0 011-1h4a1 1 0 011 1v2a1 1 0 01-1 1h-4a1 1 0 01-1-1V8zm0 4a1 1 0 011-1h4a1 1 0 011 1v2a1 1 0 01-1 1h-4a1 1 0 01-1-1v-2z" clip-rule="evenodd"/>
-                        </svg>
-                        Evidence
-                    </h2>
-                    <div id="evidenceContent" class="prose max-w-none text-gray-700"></div>
-                </div>
-
-                <!-- Statistics Panel -->
-                <div class="bg-white rounded-lg shadow-md p-6">
-                    <h2 class="text-xl font-semibold text-gray-900 mb-4 flex items-center">
-                        <svg class="w-5 h-5 mr-2 text-purple-600" fill="currentColor" viewBox="0 0 20 20">
-                            <path d="M2 11a1 1 0 011-1h2a1 1 0 011 1v5a1 1 0 01-1 1H3a1 1 0 01-1-1v-5zM8 7a1 1 0 011-1h2a1 1 0 011 1v9a1 1 0 01-1 1H9a1 1 0 01-1-1V7zM14 4a1 1 0 011-1h2a1 1 0 011 1v12a1 1 0 01-1 1h-2a1 1 0 01-1-1V4z"/>
-                        </svg>
-                        Processing Statistics
-                    </h2>
-                    <div id="statsContent" class="grid grid-cols-1 md:grid-cols-3 gap-4 text-sm">
-                        <div class="bg-gray-50 p-3 rounded">
-                            <dt class="font-medium text-gray-500">Tokens Used</dt>
-                            <dd id="tokenStats" class="text-lg font-semibold text-gray-900">-</dd>
+                    <!-- Error Display -->
+                    <div id="errorDisplay" class="hidden bg-red-50 border border-red-200 rounded-md p-4 mb-6">
+                        <div class="flex">
+                            <div class="flex-shrink-0">
+                                <svg class="h-5 w-5 text-red-400" viewBox="0 0 20 20" fill="currentColor">
+                                    <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z" clip-rule="evenodd"/>
+                                </svg>
+                            </div>
+                            <div class="ml-3">
+                                <h3 class="text-sm font-medium text-red-800">Error</h3>
+                                <div class="mt-2 text-sm text-red-700">
+                                    <p id="errorMessage"></p>
+                                </div>
+                            </div>
                         </div>
-                        <div class="bg-gray-50 p-3 rounded">
-                            <dt class="font-medium text-gray-500">Processing Time</dt>
-                            <dd id="timingStats" class="text-lg font-semibold text-gray-900">-</dd>
+                    </div>
+
+                    <!-- Success Results -->
+                    <div id="successResults" class="hidden space-y-6">
+                        <!-- Answer Section -->
+                        <div>
+                            <h3 class="text-lg font-semibold text-gray-900 mb-3 flex items-center">
+                                <svg class="w-5 h-5 mr-2 text-green-600" fill="currentColor" viewBox="0 0 20 20">
+                                    <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/>
+                                </svg>
+                                Answer
+                            </h3>
+                            <div id="answerContent" class="markdown-content prose prose-sm max-w-none text-gray-700 bg-green-50 p-4 rounded-lg border border-green-200"></div>
                         </div>
-                        <div class="bg-gray-50 p-3 rounded">
-                            <dt class="font-medium text-gray-500">Document Chunks</dt>
-                            <dd id="chunkStats" class="text-lg font-semibold text-gray-900">-</dd>
+
+                        <!-- Reasoning Section -->
+                        <div>
+                            <h3 class="text-lg font-semibold text-gray-900 mb-3 flex items-center">
+                                <svg class="w-5 h-5 mr-2 text-blue-600" fill="currentColor" viewBox="0 0 20 20">
+                                    <path fill-rule="evenodd" d="M11.49 3.17c-.38-1.56-2.6-1.56-2.98 0a1.532 1.532 0 01-2.286.948c-1.372-.836-2.942.734-2.106 2.106.54.886.061 2.042-.947 2.287-1.561.379-1.561 2.6 0 2.978a1.532 1.532 0 01.947 2.287c-.836 1.372.734 2.942 2.106 2.106a1.532 1.532 0 012.287.947c.379 1.561 2.6 1.561 2.978 0a1.533 1.533 0 012.287-.947c1.372.836 2.942-.734 2.106-2.106a1.533 1.533 0 01.947-2.287c1.561-.379 1.561-2.6 0-2.978a1.532 1.532 0 01-.947-2.287c.836-1.372-.734-2.942-2.106-2.106a1.532 1.532 0 01-2.287-.947zM10 13a3 3 0 100-6 3 3 0 000 6z" clip-rule="evenodd"/>
+                                </svg>
+                                Reasoning
+                            </h3>
+                            <div id="reasoningContent" class="markdown-content prose prose-sm max-w-none text-gray-700 bg-blue-50 p-4 rounded-lg border border-blue-200"></div>
+                        </div>
+
+                        <!-- Evidence Section -->
+                        <div>
+                            <h3 class="text-lg font-semibold text-gray-900 mb-3 flex items-center">
+                                <svg class="w-5 h-5 mr-2 text-yellow-600" fill="currentColor" viewBox="0 0 20 20">
+                                    <path fill-rule="evenodd" d="M3 4a1 1 0 011-1h12a1 1 0 011 1v2a1 1 0 01-1 1H4a1 1 0 01-1-1V4zm0 4a1 1 0 011-1h6a1 1 0 011 1v6a1 1 0 01-1 1H4a1 1 0 01-1-1V8zm8 0a1 1 0 011-1h4a1 1 0 011 1v2a1 1 0 01-1 1h-4a1 1 0 01-1-1V8zm0 4a1 1 0 011-1h4a1 1 0 011 1v2a1 1 0 01-1 1h-4a1 1 0 01-1-1v-2z" clip-rule="evenodd"/>
+                                </svg>
+                                Evidence
+                            </h3>
+                            <div id="evidenceContent" class="markdown-content prose prose-sm max-w-none text-gray-700 bg-yellow-50 p-4 rounded-lg border border-yellow-200"></div>
+                        </div>
+
+                        <!-- Statistics Section -->
+                        <div>
+                            <h3 class="text-lg font-semibold text-gray-900 mb-3 flex items-center">
+                                <svg class="w-5 h-5 mr-2 text-purple-600" fill="currentColor" viewBox="0 0 20 20">
+                                    <path d="M2 11a1 1 0 011-1h2a1 1 0 011 1v5a1 1 0 01-1 1H3a1 1 0 01-1-1v-5zM8 7a1 1 0 011-1h2a1 1 0 011 1v9a1 1 0 01-1 1H9a1 1 0 01-1-1V7zM14 4a1 1 0 011-1h2a1 1 0 011 1v12a1 1 0 01-1 1h-2a1 1 0 01-1-1V4z"/>
+                                </svg>
+                                Processing Statistics
+                            </h3>
+                            <div id="statsContent" class="grid grid-cols-1 md:grid-cols-2 gap-3 text-sm">
+                                <div class="bg-purple-50 p-3 rounded border border-purple-200">
+                                    <dt class="font-medium text-purple-800">Tokens Used</dt>
+                                    <dd id="tokenStats" class="text-lg font-semibold text-purple-900 mt-1">-</dd>
+                                </div>
+                                <div class="bg-purple-50 p-3 rounded border border-purple-200">
+                                    <dt class="font-medium text-purple-800">Processing Time</dt>
+                                    <dd id="timingStats" class="text-lg font-semibold text-purple-900 mt-1">-</dd>
+                                </div>
+                                <div class="bg-purple-50 p-3 rounded border border-purple-200">
+                                    <dt class="font-medium text-purple-800">Document Chunks</dt>
+                                    <dd id="chunkStats" class="text-lg font-semibold text-purple-900 mt-1">-</dd>
+                                </div>
+                                <div class="bg-purple-50 p-3 rounded border border-purple-200">
+                                    <dt class="font-medium text-purple-800">Pipeline Type</dt>
+                                    <dd id="pipelineStats" class="text-lg font-semibold text-purple-900 mt-1">-</dd>
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
-                </div>
-            </div>
         </div>
     </div>
 

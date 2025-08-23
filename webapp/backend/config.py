@@ -21,14 +21,14 @@ class Settings:
         self.self_openai_api_key = os.getenv("SELF_OPENAI_API_KEY")
 
         # Default LLM Settings
-        self.default_model = os.getenv("DEFAULT_MODEL", "deepseek/deepseek-r1-0528:free")
-        self.default_provider = os.getenv("DEFAULT_PROVIDER", "openrouter")
+        self.default_model = os.getenv("DEFAULT_MODEL", "gpt-4o-mini")
+        self.default_provider = os.getenv("DEFAULT_PROVIDER", "openai")
         self.default_temperature = float(os.getenv("DEFAULT_TEMPERATURE", "0.0"))
-        self.default_chunk_size = int(os.getenv("DEFAULT_CHUNK_SIZE", "36000"))
-        self.default_chunk_overlap = int(os.getenv("DEFAULT_CHUNK_OVERLAP", "1000"))
+        self.default_chunk_size = int(os.getenv("DEFAULT_CHUNK_SIZE", "32768"))
+        self.default_chunk_overlap = int(os.getenv("DEFAULT_CHUNK_OVERLAP", "4096"))
         self.default_format_type = os.getenv("DEFAULT_FORMAT_TYPE", "hybrid")
         self.default_pdf_parser = os.getenv("DEFAULT_PDF_PARSER", "marker")
-        self.default_max_concurrent_chunks = int(os.getenv("DEFAULT_MAX_CONCURRENT_CHUNKS", "20"))
+        self.default_max_concurrent_chunks = int(os.getenv("DEFAULT_MAX_CONCURRENT_CHUNKS", "50"))
 
         # File Upload Settings
         self.max_file_size = int(os.getenv("MAX_FILE_SIZE", str(50 * 1024 * 1024)))  # 50MB
