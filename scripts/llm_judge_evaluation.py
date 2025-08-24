@@ -5,7 +5,12 @@ import json
 import os
 import random
 import statistics
+import sys
 import time
+
+# Add the project root to Python path for imports
+project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+sys.path.insert(0, project_root)
 
 from langchain.prompts import load_prompt
 from tqdm import tqdm
@@ -16,7 +21,7 @@ from sklearn.metrics import precision_recall_fscore_support, confusion_matrix
 
 def load_all_samples():
     """Load all samples from all JSONL files in the results directory"""
-    results_dir = '../data/financebench/results'
+    results_dir = 'data/financebench'
     jsonl_files = glob.glob(os.path.join(results_dir, '*.jsonl'))
 
     all_samples = []
@@ -424,7 +429,7 @@ async def main_async():
     batches = [all_samples[i:i+batch_size] for i in range(0, len(all_samples), batch_size)]
 
     # If the last batch has fewer than 5 samples, remove it or pad it
-    if len(batches[-1]) < 5:
+    if batches and len(batches[-1]) < 5:
         batches.pop()
 
     print(f"Processing {len(batches)} batches with {len(batches) * batch_size} samples total")
