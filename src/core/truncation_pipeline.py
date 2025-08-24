@@ -1,7 +1,7 @@
 from typing import Dict, List, Any, Tuple, Optional, Union
-from base_pipeline import BasePipeline
-from dataset_loader import DatasetLoader
-from truncation_formatter import TruncationFormatter
+from src.core.base_pipeline import BasePipeline
+from src.loaders.dataset_loader import DatasetLoader
+from src.formatters.truncation_formatter import TruncationFormatter
 import asyncio
 import time
 
@@ -125,7 +125,7 @@ class TruncationPipeline(BasePipeline):
 
     def get_results_directory(self) -> str:
         """Override for truncation-specific directory."""
-        return "truncation_results"
+        return "results/truncation_results"
 
     def get_dataset_name(self) -> str:
         """Get dataset name with truncation suffix."""

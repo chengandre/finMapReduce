@@ -1,7 +1,7 @@
 import json
 from typing import Dict, List, Any, Tuple, Optional
-from dataset_loader import DatasetLoader
-from utils import load_document_chunk
+from src.loaders.dataset_loader import DatasetLoader
+from src.utils.document_processing import load_document_chunk
 
 
 class FinanceBenchLoader(DatasetLoader):
@@ -86,7 +86,7 @@ class FinanceBenchLoader(DatasetLoader):
         Returns:
             Tuple of (full document text, total token count)
         """
-        from utils import _marker_parser, num_tokens_from_string
+        from src.utils.document_processing import _marker_parser, num_tokens_from_string
         from pathlib import Path
 
         doc_name = qa_pair["doc_name"]
@@ -95,7 +95,7 @@ class FinanceBenchLoader(DatasetLoader):
             # First try to use marker parser to get markdown
             if self.pdf_parser == "marker":
                 # Use the same path resolution logic as utils.py
-                from utils import _resolve_document_path
+                from src.utils.document_processing import _resolve_document_path
                 try:
                     pdf_path = _resolve_document_path(doc_name)
                 except FileNotFoundError:
@@ -133,7 +133,7 @@ class FinanceBenchLoader(DatasetLoader):
 
     def get_results_directory(self) -> str:
         """Get directory for saving results."""
-        return "financebench_results"
+        return "results/financebench_results"
 
     def get_dataset_name(self) -> str:
         """Get dataset name."""

@@ -201,25 +201,25 @@ html, body {
     #statsContent {
         grid-template-columns: 1fr;
     }
-    
+
     .container {
         padding-left: 1rem;
         padding-right: 1rem;
     }
-    
+
     /* Mobile responsive: stack panels vertically */
     .three-panel-layout {
         flex-direction: column;
         height: auto;
     }
-    
+
     .panel {
         width: 100% !important;
         border-right: none;
         border-bottom: 1px solid #e5e7eb;
         min-height: 300px;
     }
-    
+
     .panel:last-child {
         border-bottom: none;
     }
@@ -304,18 +304,18 @@ html, body {
     .stats-grid {
         grid-template-columns: 1fr;
     }
-    
+
     .three-panel-layout {
         flex-direction: column;
         height: auto;
     }
-    
+
     .panel {
         border-right: none;
         border-bottom: 1px solid #e5e7eb;
         min-height: 300px;
     }
-    
+
     .panel:last-child {
         border-bottom: none;
     }
@@ -331,11 +331,11 @@ html, body {
     .no-print {
         display: none;
     }
-    
+
     body {
         background: white;
     }
-    
+
     .shadow-md {
         box-shadow: none;
         border: 1px solid #e5e7eb;

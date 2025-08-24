@@ -1,6 +1,6 @@
 from typing import Dict, List, Any, Union, Optional
 import asyncio
-from output_formatter import OutputFormatter
+from src.formatters.output_formatter import OutputFormatter
 
 
 class JSONFormatter(OutputFormatter):

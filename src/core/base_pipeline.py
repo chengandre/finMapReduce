@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 from typing import Dict, List, Any, Tuple, Optional, Union
-from async_evaluation import AsyncLLMJudgeEvaluator
+from src.evaluation.async_evaluation import AsyncLLMJudgeEvaluator
 import concurrent.futures
 from tqdm import tqdm
 import json
@@ -16,7 +16,7 @@ class BasePipeline(ABC):
     This class provides the core pipeline workflow and parallel processing
     infrastructure, while allowing subclasses to customize specific behaviors
     through abstract methods. Can support various pipeline architectures beyond MapReduce.
-    
+
     Subclasses must set self.dataset_loader and self.formatter (or equivalent) components
     for delegation methods to work properly.
     """
@@ -42,22 +42,22 @@ class BasePipeline(ABC):
         self.prompts_dict = prompts_dict
         self.max_total_requests = max_total_requests
         self.global_semaphore = asyncio.Semaphore(max_total_requests)
-        
+
         # Store additional config for subclass use
         self.config = kwargs
 
         self.judge_evaluator = None
 
     # ===== COMPONENT PROPERTIES =====
-    
+
     @property
     def dataset_loader(self):
         """Access to dataset loader component - must be set by subclasses."""
         if not hasattr(self, '_dataset_loader'):
             raise NotImplementedError("Subclasses must set self.dataset_loader or override delegation methods")
         return self._dataset_loader
-    
-    @dataset_loader.setter 
+
+    @dataset_loader.setter
     def dataset_loader(self, value):
         self._dataset_loader = value
 
@@ -67,7 +67,7 @@ class BasePipeline(ABC):
         if not hasattr(self, '_formatter'):
             raise NotImplementedError("Subclasses must set self.formatter or override delegation methods")
         return self._formatter
-        
+
     @formatter.setter
     def formatter(self, value):
         self._formatter = value
@@ -354,18 +354,18 @@ class BasePipeline(ABC):
             "processing": "Error: Processing failed",
             "llm": "Error: LLM call failed"
         }
-        
+
         qa_pair["llm_answer"] = error_messages.get(error_type, "Error: Unknown failure")
         qa_pair["llm_reasoning"] = error_msg if error_type == "processing" else f"{error_type.title()} failed: {error_msg}"
         qa_pair["llm_evidence"] = []
         qa_pair["error"] = error_msg
         qa_pair["token_stats"] = self._empty_token_stats()
         return qa_pair
-    
+
     def _handle_document_error(self, qa_pair: Dict[str, Any], error_msg: str) -> Dict[str, Any]:
         """Handle document loading errors - delegates to _handle_error."""
         return self._handle_error(qa_pair, error_msg, "document")
-    
+
     def _handle_processing_error(self, qa_pair: Dict[str, Any], error_msg: str) -> Dict[str, Any]:
         """Handle processing errors - delegates to _handle_error."""
         return self._handle_error(qa_pair, error_msg, "processing")
@@ -385,7 +385,7 @@ class BasePipeline(ABC):
     def _compile_results(self, qa_data: List[Dict], evaluation_results: Dict,
                         model_name: str, judge_model_name: str, process_time: float, doc_load_time: float, **kwargs) -> Dict:
         """Compile final results dictionary."""
-        from utils import calculate_token_usage_summary, calculate_accuracy_by_question_type, calculate_accuracy_by_question_reasoning
+        from src.utils.document_processing import calculate_token_usage_summary, calculate_accuracy_by_question_type, calculate_accuracy_by_question_reasoning
 
         # Extract question improvement tokens from kwargs
         question_improvement_tokens = kwargs.pop('question_improvement_tokens', {"input_tokens": 0, "output_tokens": 0, "cache_read_tokens": 0})
@@ -597,16 +597,16 @@ class BasePipeline(ABC):
         try:
             # Use async LLM call with global semaphore for rate limiting
             prompt_template = self.prompts_dict['question_improvement_prompt']
-            
+
             # Handle both string templates and PromptTemplate objects
             if hasattr(prompt_template, 'format'):
                 prompt = prompt_template.format(question=original_question)
             else:
                 prompt = str(prompt_template).format(question=original_question)
-            
+
             # Choose appropriate LLM (allows subclasses to override via getattr)
             llm_to_use = getattr(self, 'question_improvement_llm', None) or getattr(self, 'reduce_llm', None) or self.llm
-            
+
             async with self.global_semaphore:
                 response = await llm_to_use.ainvoke(prompt)
 

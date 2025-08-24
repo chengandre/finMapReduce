@@ -10,13 +10,13 @@ import time
 from langchain.prompts import load_prompt
 from tqdm import tqdm
 
-from async_llm_client import create_async_rate_limited_llm, RateLimitConfig
+from src.llm.async_llm_client import create_async_rate_limited_llm, RateLimitConfig
 import numpy as np
 from sklearn.metrics import precision_recall_fscore_support, confusion_matrix
 
 def load_all_samples():
     """Load all samples from all JSONL files in the results directory"""
-    results_dir = '../financebench/results'
+    results_dir = '../data/financebench/results'
     jsonl_files = glob.glob(os.path.join(results_dir, '*.jsonl'))
 
     all_samples = []
@@ -383,7 +383,7 @@ async def main_async():
         print(f"Test mode: Selected {len(all_samples)} samples for testing")
 
     # Load prompt template once
-    prompt_template = load_prompt('prompts/judge_evaluation_gpt.yml')
+    prompt_template = load_prompt('config/prompts/judge_evaluation_gpt.yml')
 
     # Configure rate-limited LLM
     # rate_limiter_config = {
@@ -466,7 +466,7 @@ async def main_async():
 
     # Process batches in parallel using async - simpler approach
     print(f"\nStarting async processing of {len(batches)} batches...")
-    
+
     # Wait for all tasks to complete and collect results
     results = await asyncio.gather(*[
         process_batch_async(i, batch, prompt_template, llm, global_semaphore)
@@ -676,7 +676,7 @@ async def main_async():
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
 
     # Create directories
-    results_dir = "llm_judge_results"
+    results_dir = "results/llm_judge_results"
     error_dir = os.path.join(results_dir, "errors")
     incorrect_judgments_dir = os.path.join(error_dir, "incorrect_judgments")
     validation_errors_dir = os.path.join(error_dir, "validation_errors")

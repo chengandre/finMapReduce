@@ -1,7 +1,7 @@
 import re
 import asyncio
 from typing import Dict, List, Any, Optional, Tuple
-from output_formatter import OutputFormatter
+from src.formatters.output_formatter import OutputFormatter
 
 
 class HybridFormatter(OutputFormatter):

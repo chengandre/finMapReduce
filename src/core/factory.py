@@ -1,11 +1,11 @@
 from typing import Type, Dict, Optional, List, Union, Any
-from base_pipeline import BasePipeline
-from mapreduce_pipeline import MapReducePipeline
-from truncation_pipeline import TruncationPipeline
-from truncation_formatter import TruncationFormatter
-from financebench_loader import FinanceBenchLoader
-from finqa_loader import FinQALoader
-from dataset_loader import DatasetLoader
+from src.core.base_pipeline import BasePipeline
+from src.core.mapreduce_pipeline import MapReducePipeline
+from src.core.truncation_pipeline import TruncationPipeline
+from src.formatters.truncation_formatter import TruncationFormatter
+from src.loaders.financebench_loader import FinanceBenchLoader
+from src.loaders.finqa_loader import FinQALoader
+from src.loaders.dataset_loader import DatasetLoader
 
 
 class PipelineFactory:
@@ -167,7 +167,7 @@ class PipelineFactory:
         if dataset == 'webapp':
             # Webapp should be handled by direct loader instance, not created here
             raise ValueError("Webapp dataset loader should be provided directly, not created by factory")
-            
+
         loader_class = cls._dataset_registry[dataset]
         if loader_class is None:
             raise ValueError(f"No loader class registered for dataset '{dataset}'")

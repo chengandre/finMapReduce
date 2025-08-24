@@ -1,8 +1,8 @@
 import json
 import os
 from typing import Dict, List, Any, Tuple, Optional
-from dataset_loader import DatasetLoader
-from utils import load_document_chunk
+from src.loaders.dataset_loader import DatasetLoader
+from src.utils.document_processing import load_document_chunk
 
 
 class FinQALoader(DatasetLoader):
@@ -83,7 +83,7 @@ class FinQALoader(DatasetLoader):
         Returns:
             Tuple of (full document text, total token count)
         """
-        from utils import num_tokens_from_string
+        from src.utils.document_processing import num_tokens_from_string
 
         doc_name = qa_pair["doc_name"]
         markdown_file = os.path.join(self.doc_dir, doc_name)
@@ -108,7 +108,7 @@ class FinQALoader(DatasetLoader):
 
     def get_results_directory(self) -> str:
         """Get directory for saving results."""
-        return "finqa_results"
+        return "results/finqa_results"
 
     def get_dataset_name(self) -> str:
         """Get dataset name."""

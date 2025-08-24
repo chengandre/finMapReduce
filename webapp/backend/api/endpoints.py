@@ -12,9 +12,9 @@ sys.path.append(os.path.join(os.path.dirname(__file__), '../../..'))
 
 from api.models import AnswerResponse, ErrorResponse, HealthResponse
 from config import settings, validate_file_upload, get_model_config, get_api_key
-from webapp_loader import WebappDatasetLoader
-from factory import PipelineFactory
-from async_llm_client import create_async_rate_limited_llm, RateLimitConfig
+from src.loaders.webapp_loader import WebappDatasetLoader
+from src.core.factory import PipelineFactory
+from src.llm.async_llm_client import create_async_rate_limited_llm, RateLimitConfig
 import yaml
 import asyncio
 
@@ -30,17 +30,17 @@ _prompts_dict: Optional[Dict[str, Any]] = None
 def load_prompts(prompt_set_name: str = "hybrid") -> Dict[str, Any]:
     """Load prompts from configuration file."""
     try:
-        # Add the parent directory to path so we can import utils from the root
+        # Add the parent directory to path so we can import src.utils.document_processing as utils from the root
         root_dir = os.path.join(os.path.dirname(__file__), '../../..')
         if root_dir not in sys.path:
             sys.path.append(root_dir)
-        
+
         # Change to root directory temporarily for prompt loading
         original_cwd = os.getcwd()
         os.chdir(root_dir)
-        
+
         try:
-            from utils import load_prompt_set
+            from src.utils.document_processing import load_prompt_set
             return load_prompt_set(prompt_set_name)
         finally:
             os.chdir(original_cwd)
@@ -73,7 +73,7 @@ def get_or_create_pipeline(config: Dict[str, Any]) -> Any:
             key_env_var = "SELF_OPENAI_API_KEY" if config.get("key_type") == "self" else "OPENAI_API_KEY"
             if config["provider"] == "openrouter":
                 key_env_var = "OPENROUTER_API_KEY"
-                
+
             # Temporarily set the API key in environment
             original_value = os.environ.get(key_env_var)
             os.environ[key_env_var] = api_key
@@ -138,10 +138,10 @@ def get_or_create_pipeline(config: Dict[str, Any]) -> Any:
                 pdf_parser=config["pdf_parser"],
                 max_file_size=settings.max_file_size
             )
-            
+
             # Create pipeline using factory
             pipeline_type = config.get('pipeline_type', 'mapreduce')
-            
+
             if pipeline_type == 'mapreduce':
                 pipeline = PipelineFactory.create_pipeline(
                     dataset='webapp',
@@ -243,7 +243,7 @@ async def answer_question(
             max_concurrent_chunks=max_concurrent_chunks,
             key_type=key_type
         )
-        
+
         # Add webapp-specific parameters
         config['pipeline_type'] = pipeline_type
         config['strategy'] = strategy
@@ -274,7 +274,7 @@ async def answer_question(
 
         # Extract token statistics and create unified stats for frontend
         token_stats = result.get("token_stats", {})
-        
+
         # Map fields for webapp response
         webapp_result = {
             "answer": result.get("llm_answer", ""),
@@ -358,7 +358,7 @@ async def preview_document(
     Returns first 2000 characters of the document for preview.
     """
     temp_file_path = None
-    
+
     try:
         # Validate file
         if not file.filename:
@@ -378,10 +378,10 @@ async def preview_document(
 
         # Create webapp loader for document processing
         webapp_loader = WebappDatasetLoader(pdf_parser=pdf_parser)
-        
+
         # Load document content
         file_ext = Path(file.filename).suffix.lower()
-        
+
         if file_ext == '.pdf':
             # Get full document text for preview
             full_text, token_count = webapp_loader.load_full_document({
@@ -394,12 +394,12 @@ async def preview_document(
             token_count = len(full_text) // 4  # Rough estimate
         else:
             raise HTTPException(status_code=400, detail="Unsupported file type")
-        
+
         # Limit preview to first 2000 characters for display
         preview_text = full_text[:2000]
         if len(full_text) > 2000:
             preview_text += "\n\n... (content truncated for preview)"
-        
+
         return {
             "filename": file.filename,
             "file_type": file_ext,
@@ -409,7 +409,7 @@ async def preview_document(
             "full_length": len(full_text),
             "is_truncated": len(full_text) > 2000
         }
-        
+
     except HTTPException:
         raise
     except Exception as e:

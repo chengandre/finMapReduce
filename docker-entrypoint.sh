@@ -18,7 +18,7 @@ command_exists() {
 # Function to check environment variables
 check_env_vars() {
     echo -e "${BLUE}📋 Checking environment configuration...${NC}"
-    
+
     # Check if at least one API key is set
     if [[ -z "$OPENAI_API_KEY" && -z "$OPENROUTER_API_KEY" && -z "$SELF_OPENAI_API_KEY" ]]; then
         echo -e "${RED}❌ Error: No API keys found!${NC}"
@@ -30,7 +30,7 @@ check_env_vars() {
         echo -e "${YELLOW}   You can set these in your .env file${NC}"
         exit 1
     fi
-    
+
     # Log which API keys are available (without showing the actual keys)
     if [[ -n "$OPENAI_API_KEY" ]]; then
         echo -e "${GREEN}✅ OpenAI API key configured${NC}"
@@ -46,10 +46,10 @@ check_env_vars() {
 # Function to create necessary directories
 create_directories() {
     echo -e "${BLUE}📁 Creating necessary directories...${NC}"
-    
+
     # Create directories with proper permissions
-    mkdir -p /app/marker /app/pdf_cache /app/webapp/backend/prompts_log /tmp/webapp_uploads
-    
+    mkdir -p /app/cache/marker /app/cache/pdf_cache /app/cache/prompts_log /tmp/webapp_uploads
+
     echo -e "${GREEN}✅ Directories created${NC}"
 }
 
@@ -57,22 +57,22 @@ create_directories() {
 main() {
     echo -e "${BLUE}🐳 MapReduce QA WebApp Docker Container${NC}"
     echo "=================================================="
-    
+
     # Run checks
     check_env_vars
     create_directories
-    
+
     # Set default values
     export HOST=${HOST:-0.0.0.0}
     export PORT=${PORT:-8000}
-    
+
     echo ""
     echo -e "${GREEN}🎉 Configuration complete!${NC}"
     echo -e "${BLUE}📱 Starting server on ${HOST}:${PORT}${NC}"
     echo -e "${BLUE}🌐 Frontend: http://localhost:${PORT}${NC}"
     echo -e "${BLUE}📚 API Docs: http://localhost:${PORT}/docs${NC}"
     echo ""
-    
+
     # Execute the command passed to the container
     exec "$@"
 }

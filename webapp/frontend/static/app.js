@@ -18,20 +18,20 @@ document.addEventListener('DOMContentLoaded', function() {
     const submitBtn = document.getElementById('submitBtn');
     const submitText = document.getElementById('submitText');
     const loadingSpinner = document.getElementById('loadingSpinner');
-    
+
     // Pipeline type elements
     const pipelineTypeSelect = document.getElementById('pipeline_type');
     const formatTypeContainer = document.getElementById('format_type_container');
     const strategyContainer = document.getElementById('strategy_container');
     const truncationOptions = document.getElementById('truncationOptions');
-    
+
     // Results elements
     const welcomeMessage = document.getElementById('welcomeMessage');
     const errorDisplay = document.getElementById('errorDisplay');
     const successResults = document.getElementById('successResults');
     const errorMessage = document.getElementById('errorMessage');
     const resultsHeader = document.getElementById('resultsHeader');
-    
+
     // Preview elements (using correct IDs from enhanced HTML)
     const documentPreviewPanel = document.getElementById('documentPreviewPanel');
     const defaultPreviewMessage = document.getElementById('defaultPreviewMessage');
@@ -88,7 +88,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
         // Provider model mapping
         document.getElementById('provider').addEventListener('change', updateModelOptions);
-        
+
         // Preview functionality
         if (previewBtn) {
             previewBtn.addEventListener('click', showDocumentPreview);
@@ -108,7 +108,7 @@ document.addEventListener('DOMContentLoaded', function() {
     function handleDrop(e) {
         e.preventDefault();
         dropZone.classList.remove('border-blue-400', 'bg-blue-50');
-        
+
         const files = e.dataTransfer.files;
         if (files.length > 0) {
             handleFileSelection(files[0]);
@@ -125,33 +125,33 @@ document.addEventListener('DOMContentLoaded', function() {
         // Validate file type
         const allowedTypes = ['.pdf', '.txt', '.md'];
         const fileExt = '.' + file.name.split('.').pop().toLowerCase();
-        
+
         if (!allowedTypes.includes(fileExt)) {
             showError('Unsupported file type. Please upload a PDF, TXT, or MD file.');
             return;
         }
-        
+
         // Validate file size (50MB)
         const maxSize = 50 * 1024 * 1024;
         if (file.size > maxSize) {
             showError(`File size (${(file.size / 1024 / 1024).toFixed(1)}MB) exceeds maximum allowed size (50MB).`);
             return;
         }
-        
+
         // Update UI
         dropText.classList.add('hidden');
         fileInfo.classList.remove('hidden');
         fileName.textContent = file.name;
         fileStats.textContent = `${(file.size / 1024).toFixed(1)} KB • ${file.type || getFileTypeFromExtension(file.name)}`;
-        
+
         // Set the file input
         const dt = new DataTransfer();
         dt.items.add(file);
         fileInput.files = dt.files;
-        
+
         // Hide any previous errors
         hideError();
-        
+
         // Show document preview in the second panel
         showDocumentPreviewInPanel(file);
     }
@@ -164,7 +164,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
     function toggleAdvancedOptions() {
         const isHidden = advancedOptions.classList.contains('hidden');
-        
+
         if (isHidden) {
             advancedOptions.classList.remove('hidden');
             chevron.style.transform = 'rotate(90deg)';
@@ -176,7 +176,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
     function updatePipelineOptions() {
         const pipelineType = pipelineTypeSelect.value;
-        
+
         if (pipelineType === 'mapreduce') {
             formatTypeContainer.classList.remove('hidden');
             strategyContainer.classList.add('hidden');
@@ -191,10 +191,10 @@ document.addEventListener('DOMContentLoaded', function() {
     function updateModelOptions() {
         const provider = document.getElementById('provider').value;
         const modelSelect = document.getElementById('model_name');
-        
+
         // Clear existing options
         modelSelect.innerHTML = '';
-        
+
         const modelsByProvider = {
             'openai': [
                 { value: 'gpt-4o-mini', text: 'GPT-4o Mini' },
@@ -208,7 +208,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 { value: 'meta-llama/llama-3.1-8b-instruct:free', text: 'Llama 3.1 8B (Free)' }
             ]
         };
-        
+
         const models = modelsByProvider[provider] || modelsByProvider['openai'];
         models.forEach(model => {
             const option = document.createElement('option');
@@ -222,7 +222,7 @@ document.addEventListener('DOMContentLoaded', function() {
         try {
             const response = await fetch('/api/models');
             const options = await response.json();
-            
+
             // Update prompt sets if available
             if (options.prompt_sets) {
                 const promptSelect = document.getElementById('prompt_set');
@@ -242,27 +242,27 @@ document.addEventListener('DOMContentLoaded', function() {
 
     async function handleFormSubmit(e) {
         e.preventDefault();
-        
+
         // Validation
         if (!fileInput.files[0]) {
             showError('Please upload a document first.');
             return;
         }
-        
+
         if (!questionInput.value.trim()) {
             showError('Please enter a question.');
             return;
         }
-        
+
         // Show loading state
         setLoading(true);
         hideError();
         hideResults();
-        
+
         try {
             // Prepare form data
             const formData = new FormData();
-            
+
             // Add all form fields
             const formElements = form.elements;
             for (let element of formElements) {
@@ -274,29 +274,29 @@ document.addEventListener('DOMContentLoaded', function() {
                     }
                 }
             }
-            
+
             // Add pipeline-specific parameters
             const pipelineType = pipelineTypeSelect.value;
             if (pipelineType === 'truncation') {
                 // For truncation, format_type is not used
                 formData.delete('format_type');
             }
-            
+
             // Submit request
             const response = await fetch('/api/answer', {
                 method: 'POST',
                 body: formData
             });
-            
+
             const data = await response.json();
-            
+
             if (!response.ok) {
                 throw new Error(data.error?.message || 'Request failed');
             }
-            
+
             // Display results
             displayResults(data);
-            
+
         } catch (error) {
             console.error('Error:', error);
             showError(error.message || 'An error occurred while processing your request.');
@@ -310,7 +310,7 @@ document.addEventListener('DOMContentLoaded', function() {
         if (welcomeMessage) {
             welcomeMessage.classList.add('hidden');
         }
-        
+
         // Update header
         if (resultsHeader) {
             const h2 = resultsHeader.querySelector('h2');
@@ -318,19 +318,19 @@ document.addEventListener('DOMContentLoaded', function() {
             if (h2) h2.textContent = 'Analysis Complete';
             if (p) p.textContent = 'Results for your document analysis';
         }
-        
+
         // Display answer (with markdown rendering)
         const answerElement = document.getElementById('answerContent');
         if (answerElement) {
             answerElement.innerHTML = renderMarkdown(data.answer || 'No answer provided');
         }
-        
+
         // Display reasoning (with markdown rendering)
         const reasoningElement = document.getElementById('reasoningContent');
         if (reasoningElement) {
             reasoningElement.innerHTML = renderMarkdown(data.reasoning || 'No reasoning provided');
         }
-        
+
         // Display evidence (handle array or string)
         const evidenceElement = document.getElementById('evidenceContent');
         if (evidenceElement) {
@@ -340,17 +340,17 @@ document.addEventListener('DOMContentLoaded', function() {
                 evidenceElement.innerHTML = renderMarkdown(data.evidence || 'No evidence provided');
             }
         }
-        
+
         // Display statistics
         updateStatistics(data);
-        
+
         // Show results
         successResults.classList.remove('hidden');
     }
 
     function updateStatistics(data) {
         const { token_stats, timing_stats, chunk_stats } = data;
-        
+
         // Token stats
         const tokenElement = document.getElementById('tokenStats');
         if (token_stats && token_stats.total) {
@@ -359,7 +359,7 @@ document.addEventListener('DOMContentLoaded', function() {
             const output = total.output_tokens || 0;
             const cache = total.cache_read_tokens || 0;
             const totalTokens = input + output;
-            
+
             let tokenText = `${totalTokens.toLocaleString()} total`;
             if (input > 0 || output > 0) {
                 tokenText += ` (${input.toLocaleString()} in, ${output.toLocaleString()} out)`;
@@ -371,7 +371,7 @@ document.addEventListener('DOMContentLoaded', function() {
         } else {
             tokenElement.textContent = 'N/A';
         }
-        
+
         // Timing stats
         const timingElement = document.getElementById('timingStats');
         if (timing_stats && Object.keys(timing_stats).length > 0) {
@@ -379,7 +379,7 @@ document.addEventListener('DOMContentLoaded', function() {
             const reduceTime = timing_stats.reduce_phase_time || 0;
             const llmTime = timing_stats.llm_call_time || 0;
             const totalTime = timing_stats.total_time || 0;
-            
+
             if (mapTime > 0 && reduceTime > 0) {
                 // MapReduce pipeline timing
                 timingElement.textContent = `${totalTime.toFixed(1)}s total (${mapTime.toFixed(1)}s map, ${reduceTime.toFixed(1)}s reduce)`;
@@ -396,7 +396,7 @@ document.addEventListener('DOMContentLoaded', function() {
         } else {
             timingElement.textContent = 'N/A';
         }
-        
+
         // Chunk stats
         const chunkElement = document.getElementById('chunkStats');
         if (chunk_stats && Object.keys(chunk_stats).length > 0) {
@@ -404,7 +404,7 @@ document.addEventListener('DOMContentLoaded', function() {
             const filtering = chunk_stats.filtering_stats || {};
             const totalChunks = filtering.chunks_before_filtering || chunk_stats.total_chunks || 0;
             const afterFiltering = filtering.chunks_after_filtering || 0;
-            
+
             if (totalChunks > 0) {
                 let chunkText = `${totalChunks} chunks`;
                 if (totalDocs > 0) {
@@ -420,7 +420,7 @@ document.addEventListener('DOMContentLoaded', function() {
         } else {
             chunkElement.textContent = 'N/A';
         }
-        
+
         // Pipeline type
         const pipelineElement = document.getElementById('pipelineStats');
         const pipelineType = pipelineTypeSelect.value;
@@ -467,7 +467,7 @@ document.addEventListener('DOMContentLoaded', function() {
     function hideResults() {
         successResults.classList.add('hidden');
         welcomeMessage.classList.remove('hidden');
-        
+
         // Reset header
         resultsHeader.querySelector('h2').textContent = 'Analysis Results';
         resultsHeader.querySelector('p').textContent = 'Upload a document and ask a question to see results here';
@@ -477,7 +477,7 @@ document.addEventListener('DOMContentLoaded', function() {
         const ext = filename.split('.').pop().toLowerCase();
         const types = {
             'pdf': 'PDF Document',
-            'txt': 'Text File', 
+            'txt': 'Text File',
             'md': 'Markdown File'
         };
         return types[ext] || 'Unknown';
@@ -497,11 +497,11 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         }
     }
-    
+
     // Function to show document preview in the second panel (new 3-panel layout)
     function showDocumentPreviewInPanel(file) {
         const fileExt = '.' + file.name.split('.').pop().toLowerCase();
-        
+
         // Get new preview panel elements
         const defaultPreviewMessage = document.getElementById('defaultPreviewMessage');
         const actualDocumentPreview = document.getElementById('actualDocumentPreview');
@@ -511,29 +511,29 @@ document.addEventListener('DOMContentLoaded', function() {
         const previewFileSize = document.getElementById('previewFileSize');
         const previewFileType = document.getElementById('previewFileType');
         const previewFileModified = document.getElementById('previewFileModified');
-        
+
         // Hide default message and show actual preview
         if (defaultPreviewMessage) defaultPreviewMessage.classList.add('hidden');
         if (actualDocumentPreview) actualDocumentPreview.classList.remove('hidden');
-        
+
         // Update file info
         if (previewFileName) previewFileName.textContent = file.name;
         if (previewFileSize) previewFileSize.textContent = `${(file.size / 1024).toFixed(1)} KB`;
         if (previewFileType) previewFileType.textContent = fileExt.toUpperCase().replace('.', '');
         if (previewFileModified) previewFileModified.textContent = new Date(file.lastModified).toLocaleString();
-        
+
         if (fileExt === '.txt' || fileExt === '.md') {
             // For text files, show content preview
             if (previewLoadingSpinner) previewLoadingSpinner.classList.remove('hidden');
             if (previewContent) previewContent.textContent = 'Loading...';
-            
+
             const reader = new FileReader();
             reader.onload = function(e) {
                 const content = e.target.result;
-                const previewText = content.length > 8000 ? 
-                    content.substring(0, 8000) + '\n\n... (file truncated for preview, full content will be processed)' : 
+                const previewText = content.length > 8000 ?
+                    content.substring(0, 8000) + '\n\n... (file truncated for preview, full content will be processed)' :
                     content;
-                
+
                 if (previewLoadingSpinner) previewLoadingSpinner.classList.add('hidden');
                 if (previewContent) {
                     if (fileExt === '.md') {

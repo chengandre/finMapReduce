@@ -36,7 +36,7 @@ class StartTruncationStrategy(TruncationStrategy):
     """Keep the beginning of the document, truncate the end."""
 
     def truncate(self, text: str, max_tokens: int) -> Tuple[str, Dict]:
-        from utils import num_tokens_from_string
+        from src.utils.document_processing import num_tokens_from_string
 
         current_tokens = num_tokens_from_string(text, "cl100k_base")
 
@@ -80,7 +80,7 @@ class EndTruncationStrategy(TruncationStrategy):
     """Keep the end of the document, truncate the beginning."""
 
     def truncate(self, text: str, max_tokens: int) -> Tuple[str, Dict]:
-        from utils import num_tokens_from_string
+        from src.utils.document_processing import num_tokens_from_string
 
         current_tokens = num_tokens_from_string(text, "cl100k_base")
 
@@ -132,7 +132,7 @@ class SmartTruncationStrategy(TruncationStrategy):
     """
 
     def truncate(self, text: str, max_tokens: int) -> Tuple[str, Dict]:
-        from utils import num_tokens_from_string
+        from src.utils.document_processing import num_tokens_from_string
 
         current_tokens = num_tokens_from_string(text, "cl100k_base")
 
@@ -238,7 +238,7 @@ def estimate_prompt_tokens(question: str, template_overhead: int = 500) -> int:
     Returns:
         Estimated prompt tokens
     """
-    from utils import num_tokens_from_string
+    from src.utils.document_processing import num_tokens_from_string
 
     question_tokens = num_tokens_from_string(question, "cl100k_base")
     return question_tokens + template_overhead

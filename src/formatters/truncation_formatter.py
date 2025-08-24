@@ -53,14 +53,14 @@ class TruncationFormatter:
         Returns:
             Tuple of (truncated_text, truncation_statistics)
         """
-        from truncation_utils import TruncationManager
+        from src.utils.truncation_utils import TruncationManager
 
         # Calculate available tokens for document
         if self.max_document_tokens is not None:
             max_doc_tokens = self.max_document_tokens
         else:
             # Estimate prompt tokens (question + template overhead)
-            from utils import num_tokens_from_string
+            from src.utils.document_processing import num_tokens_from_string
             prompt_tokens = num_tokens_from_string(question, "cl100k_base") + self.buffer
             max_doc_tokens = self.context_window - prompt_tokens
 

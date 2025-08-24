@@ -54,16 +54,16 @@ FROM dependencies as application
 COPY . .
 
 # Create necessary directories
-RUN mkdir -p /app/marker \
-    /app/pdf_cache \
-    /app/webapp/backend/prompts_log \
+RUN mkdir -p /app/cache/marker \
+    /app/cache/pdf_cache \
+    /app/cache/prompts_log \
     /tmp/webapp_uploads
 
 # Set proper permissions
 RUN chown -R app:app /app /tmp/webapp_uploads
 
 # Copy entrypoint script
-COPY docker-entrypoint.webapp.sh /entrypoint.sh
+COPY docker-entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh && chown app:app /entrypoint.sh
 
 # Switch to app user

@@ -34,8 +34,8 @@ def _resolve_document_path(document_file):
 
     Search locations for document names:
     - Current directory
-    - ./financebench/pdfs/ (for FinanceBench PDFs)
-    - ./finqa/markdowns/ (for FinQA markdown files)
+    - ./data/financebench/pdfs/ (for FinanceBench PDFs)
+    - ./data/finqa/markdowns/ (for FinQA markdown files)
 
     Args:
         document_file (str): Document name, relative path, or absolute path
@@ -63,8 +63,8 @@ def _resolve_document_path(document_file):
     if not document_path.suffix:
         search_locations = [
             Path.cwd(),  # Current directory
-            Path("./financebench/pdfs"),  # FinanceBench PDFs
-            Path("./finqa/markdowns"),   # FinQA markdown files
+            Path("./data/financebench/pdfs"),  # FinanceBench PDFs
+            Path("./data/finqa/markdowns"),   # FinQA markdown files
         ]
 
         # Try both .pdf and .md extensions
@@ -81,9 +81,9 @@ def _resolve_document_path(document_file):
     if document_path.suffix:
         search_locations = [
             Path.cwd(),
-            Path("./financebench/pdfs"),
-            Path("./financebench/markdowns"),
-            Path("./finqa/markdowns"),
+            Path("./data/financebench/pdfs"),
+            Path("./data/financebench/markdowns"),
+            Path("./data/finqa/markdowns"),
         ]
 
         for location in search_locations:
@@ -95,7 +95,7 @@ def _resolve_document_path(document_file):
     # Not found anywhere
     raise FileNotFoundError(
         f"Document '{document_file}' not found. Searched in: current directory, "
-        f"./financebench/pdfs, ./finqa/markdowns. "
+        f"./data/financebench/pdfs, ./data/finqa/markdowns. "
         f"Please provide either a valid document name (e.g., 'APPLE_2020') or full path."
     )
 
@@ -128,7 +128,7 @@ def _get_document_cache_path(document_file, method, chunk_size, chunk_overlap):
     cache_hash = hashlib.md5(cache_key.encode()).hexdigest()
 
     # Create cache directory structure - use document_cache instead of pdf_cache
-    cache_dir = Path("document_cache") / method
+    cache_dir = Path("cache/document_cache") / method
     cache_dir.mkdir(parents=True, exist_ok=True)
 
     return cache_dir / f"{document_path.stem}_{cache_hash}.pkl"
@@ -208,13 +208,13 @@ def _marker_parser(pdf_file, force_reparse=False):
     pdf_name = pdf_path.stem
 
     # Check if pdf is already parsed from financeBench
-    financebench_markdown_path = Path("./financebench/markdowns") / f"{pdf_name}.md"
+    financebench_markdown_path = Path("./data/financebench/markdowns") / f"{pdf_name}.md"
     if not force_reparse and financebench_markdown_path.exists():
         # print(f"Found existing financeBench markdown for {pdf_name}: {financebench_markdown_path}")
         return str(financebench_markdown_path)
 
     # Check local marker output directory
-    local_markdown_dir = Path("marker") / pdf_name
+    local_markdown_dir = Path("cache/marker") / pdf_name
     local_markdown_file = local_markdown_dir / f"{pdf_name}.md"
 
     if not force_reparse and local_markdown_file.exists():
@@ -226,7 +226,7 @@ def _marker_parser(pdf_file, force_reparse=False):
 
     # Run marker CLI command with absolute path
     try:
-        output_dir = Path("marker")
+        output_dir = Path("cache/marker")
         print(f"Parsing {pdf_path} with marker...")
         cmd = ["marker_single", str(pdf_path), "--output_dir", str(output_dir), "--output_format", "markdown", "--format_lines"]
         subprocess.run(cmd, check=True)
@@ -570,7 +570,7 @@ def load_prompt_set(prompt_set_name=None):
         dict: Dictionary containing pre-loaded prompt objects with keys:
               'map_prompt', 'reduce_prompt', 'judge_prompt'
     """
-    config_path = "prompts/prompt_config.yml"
+    config_path = "config/prompts/prompt_config.yml"
     with open(config_path, 'r') as f:
         config = yaml.safe_load(f)
 

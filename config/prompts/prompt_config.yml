@@ -1,0 +1,34 @@
+prompt_sets:
+  default:
+    map_prompt: "config/prompts/map_prompt_hybrid.yml"
+    reduce_prompt: "config/prompts/reduce_prompt_hybrid.yml"
+    judge_prompt: "config/prompts/judge_prompt.yml"
+
+  baseline:
+    map_prompt: "config/prompts/map_prompt_baseline.yml"
+    reduce_prompt: "config/prompts/reduce_prompt_baseline.yml"
+    judge_prompt: "config/prompts/judge_prompt_baseline.yml"
+
+  standard:
+    map_prompt: "config/prompts/map_prompt.yml"
+    reduce_prompt: "config/prompts/reduce_prompt.yml"
+    judge_prompt: "config/prompts/judge_prompt.yml"
+
+  hybrid:
+    map_prompt: "config/prompts/map_prompt_hybrid.yml"
+    reduce_prompt: "config/prompts/reduce_prompt_hybrid.yml"
+    judge_prompt: "config/prompts/judge_prompt.yml"
+    question_improvement_prompt: "config/prompts/question_improvement_prompt.yml"
+
+  direct:
+    map_prompt: "config/prompts/direct_prompt.yml"
+    reduce_prompt: "config/prompts/direct_prompt.yml"
+    judge_prompt: "config/prompts/judge_prompt.yml"
+
+  finqa:
+    map_prompt: "config/prompts/map_prompt_finqa.yml"
+    reduce_prompt: "config/prompts/reduce_prompt_finqa.yml"
+    judge_prompt: "config/prompts/judge_prompt.yml"
+
+# Default prompt set if none specified
+default_set: "default"

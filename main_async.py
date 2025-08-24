@@ -1,10 +1,10 @@
 import asyncio
 import argparse
 
-from utils import load_prompt_set
-from async_llm_client import RateLimitConfig
-from async_llm_client import create_async_rate_limited_llm
-from factory import PipelineFactory
+from src.utils.document_processing import load_prompt_set
+from src.llm.async_llm_client import RateLimitConfig
+from src.llm.async_llm_client import create_async_rate_limited_llm
+from src.core.factory import PipelineFactory
 
 
 async def main_async():
@@ -83,9 +83,9 @@ async def main_async():
     # Auto-detect data path if not provided
     if args.data_path is None:
         if args.dataset == 'financebench':
-            data_path = 'financebench/financebench_open_source.jsonl'
+            data_path = 'data/financebench/financebench_open_source.jsonl'
         else:
-            data_path = 'finqa/finqa_test.json'
+            data_path = 'data/finqa/finqa_subset_test.json'
     else:
         data_path = args.data_path
 

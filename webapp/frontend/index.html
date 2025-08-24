@@ -45,7 +45,7 @@
                 <p>Upload documents and configure processing settings</p>
             </div>
             <div class="panel-content">
-                
+
                 <form id="qaForm" enctype="multipart/form-data" class="space-y-6">
                     <!-- File Upload -->
                     <div>
@@ -79,10 +79,10 @@
                         <label for="question" class="block text-sm font-medium text-gray-700 mb-2">
                             Your Question
                         </label>
-                        <textarea 
-                            id="question" 
-                            name="question" 
-                            rows="3" 
+                        <textarea
+                            id="question"
+                            name="question"
+                            rows="3"
                             class="w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 text-sm"
                             placeholder="What would you like to know about this document?"
                             required
@@ -103,7 +103,7 @@
                                 <option value="truncation">Truncation (Single Pass)</option>
                             </select>
                         </div>
-                        
+
                         <div id="format_type_container">
                             <label for="format_type" class="block text-sm font-medium text-gray-700 mb-1">Format Type</label>
                             <select id="format_type" name="format_type" class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500">
@@ -112,7 +112,7 @@
                                 <option value="plain_text">Plain Text</option>
                             </select>
                         </div>
-                        
+
                         <div id="strategy_container" class="hidden">
                             <label for="strategy" class="block text-sm font-medium text-gray-700 mb-1">Truncation Strategy</label>
                             <select id="strategy" name="strategy" class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500">
@@ -129,7 +129,7 @@
                             <label for="model_name" class="block text-sm font-medium text-gray-700 mb-1">Model</label>
                             <input type="text" id="model_name" name="model_name" value="gpt-4o-mini" class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500" placeholder="Enter model name">
                         </div>
-                        
+
                         <div>
                             <label for="provider" class="block text-sm font-medium text-gray-700 mb-1">Provider</label>
                             <select id="provider" name="provider" class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500">
@@ -147,7 +147,7 @@
                             </svg>
                             Advanced Options
                         </button>
-                        
+
                         <div id="advancedOptions" class="hidden space-y-4 p-4 bg-gray-50 rounded-lg">
                             <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                                 <div>
@@ -161,7 +161,7 @@
                                         <option value="finqa">FinQA</option>
                                     </select>
                                 </div>
-                                
+
                                 <div>
                                     <label for="pdf_parser" class="block text-sm font-medium text-gray-700 mb-1">PDF Parser</label>
                                     <select id="pdf_parser" name="pdf_parser" class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500">
@@ -170,35 +170,35 @@
                                         <option value="pdfminer">PDFMiner (Fallback)</option>
                                     </select>
                                 </div>
-                                
+
                                 <div>
                                     <label for="temperature" class="block text-sm font-medium text-gray-700 mb-1">Temperature</label>
                                     <input type="number" id="temperature" name="temperature" value="0.0" min="0" max="2" step="0.1" class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500">
                                 </div>
-                                
+
                                 <div>
                                     <label for="score_threshold" class="block text-sm font-medium text-gray-700 mb-1">Score Threshold</label>
                                     <input type="number" id="score_threshold" name="score_threshold" value="5" min="1" max="100" step="1" class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500">
                                 </div>
-                                
+
                                 <div>
                                     <label for="chunk_size" class="block text-sm font-medium text-gray-700 mb-1">Chunk Size</label>
                                     <input type="number" id="chunk_size" name="chunk_size" value="32768" min="1000" max="100000" step="1" class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500">
                                 </div>
-                                
+
                                 <div>
                                     <label for="chunk_overlap" class="block text-sm font-medium text-gray-700 mb-1">Chunk Overlap</label>
                                     <input type="number" id="chunk_overlap" name="chunk_overlap" value="4096" min="0" max="10000" step="1" class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500">
                                 </div>
                             </div>
-                            
+
                             <!-- Truncation-specific options -->
                             <div id="truncationOptions" class="hidden grid grid-cols-1 md:grid-cols-2 gap-4">
                                 <div>
                                     <label for="context_window" class="block text-sm font-medium text-gray-700 mb-1">Context Window</label>
                                     <input type="number" id="context_window" name="context_window" value="128000" min="1000" max="200000" step="1000" class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500">
                                 </div>
-                                
+
                                 <div>
                                     <label for="buffer" class="block text-sm font-medium text-gray-700 mb-1">Response Buffer</label>
                                     <input type="number" id="buffer" name="buffer" value="2000" min="500" max="10000" step="100" class="w-full px-3 py-2 text-sm border border-gray-300 rounded-md focus:outline-none focus:ring-blue-500 focus:border-blue-500">
@@ -209,8 +209,8 @@
 
                     <!-- Submit Button -->
                     <div class="pt-4">
-                        <button 
-                            type="submit" 
+                        <button
+                            type="submit"
                             id="submitBtn"
                             class="w-full bg-blue-600 text-white py-3 px-4 rounded-md hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 transition-colors font-medium"
                         >
@@ -242,7 +242,7 @@
                     <h3 class="text-lg font-medium text-gray-500 mb-2">No Document Loaded</h3>
                     <p class="text-gray-400">Upload a document to see its preview here</p>
                 </div>
-                
+
                 <!-- Actual Document Preview -->
                 <div id="actualDocumentPreview" class="hidden">
                     <!-- Document Info -->
@@ -266,7 +266,7 @@
                             </div>
                         </div>
                     </div>
-                    
+
                     <!-- Document Content -->
                     <div class="bg-gray-50 p-4 rounded-lg border border-gray-200 overflow-y-auto" style="max-height: calc(100vh - 350px);">
                         <div id="previewLoadingSpinner" class="hidden text-center text-gray-500 py-8">

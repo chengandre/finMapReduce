@@ -1,10 +1,10 @@
 from typing import Dict, List, Any, Tuple, Optional, Union
-from base_pipeline import BasePipeline
-from output_formatter import OutputFormatter
-from dataset_loader import DatasetLoader
-from json_formatter import JSONFormatter
-from plain_text_formatter import PlainTextFormatter
-from hybrid_formatter import HybridFormatter
+from src.core.base_pipeline import BasePipeline
+from src.formatters.output_formatter import OutputFormatter
+from src.loaders.dataset_loader import DatasetLoader
+from src.formatters.json_formatter import JSONFormatter
+from src.formatters.plain_text_formatter import PlainTextFormatter
+from src.formatters.hybrid_formatter import HybridFormatter
 import asyncio
 
 
@@ -50,13 +50,13 @@ class MapReducePipeline(BasePipeline):
             'chunk_overlap': chunk_overlap,
             'format_type': format_type
         })
-        
+
         super().__init__(
             llm=llm,
             prompts_dict=prompts_dict,
             **kwargs
         )
-        
+
         # MapReduce-specific LLM handling
         self.map_llm = map_llm if map_llm is not None else llm
         self.reduce_llm = reduce_llm if reduce_llm is not None else llm
