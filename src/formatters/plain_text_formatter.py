@@ -165,7 +165,7 @@ class PlainTextFormatter(OutputFormatter):
         """
         prompt = self.prompts_dict['reduce_prompt'].format(
             summaries=formatted_results,
-            question_final=question
+            question=question
         )
 
         return await self.reduce_llm.ainvoke(prompt)

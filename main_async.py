@@ -56,7 +56,7 @@ async def main_async():
     parser.add_argument('--strategy', type=str, default='start',
                        choices=['start', 'end', 'smart'],
                        help='Truncation strategy for truncation approach')
-    parser.add_argument('--context_window', type=int, default=128000,
+    parser.add_argument('--context_window', type=int, default=120000,
                        help='Maximum context window size for truncation approach')
     parser.add_argument('--buffer', type=int, default=2000,
                        help='Safety buffer for response tokens in truncation approach')
@@ -223,7 +223,8 @@ async def main_async():
                 'chunk_overlap': args.chunk_overlap,
                 'pdf_parser': args.pdf_parser,
                 'score_threshold': args.score_threshold,
-                'max_total_requests': args.max_total_requests
+                'max_total_requests': args.max_total_requests,
+                'judge_llm': judge_llm,
             }
 
             # Add dataset-specific arguments
@@ -248,7 +249,8 @@ async def main_async():
                 'llm': llm_client,
                 'prompts_dict': prompts_dict,
                 'pdf_parser': args.pdf_parser,
-                'max_total_requests': args.max_total_requests
+                'max_total_requests': args.max_total_requests,
+                'judge_llm': judge_llm,
             }
 
             # Add optional max_document_tokens if provided
